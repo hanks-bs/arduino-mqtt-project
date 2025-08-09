@@ -10,6 +10,7 @@ import {
 	Alert,
 	Box,
 	Button,
+	Chip,
 	Checkbox,
 	Divider,
 	FormControlLabel,
@@ -311,6 +312,86 @@ export default function SessionPanel() {
 		});
 	}, [selectedSessions]);
 
+	// -------------------------- Scoring & expectations --------------------------
+	const thresholds = {
+		p99MsGood: 20,
+		p99MsWarn: 40,
+		eluGood: 0.5,
+		eluWarn: 0.7,
+		jitterGood: 20,
+		jitterWarn: 40,
+		freshGood: 1500,
+		freshWarn: 3000,
+	};
+
+	function rankValues(values: number[], lowerIsBetter = true): number[] {
+		const sorted = [...values]
+			.map((v, i) => ({ v, i }))
+			.sort((a, b) => (lowerIsBetter ? a.v - b.v : b.v - a.v));
+		const ranks: number[] = Array(values.length).fill(0);
+		sorted.forEach((item, idx) => (ranks[item.i] = idx + 1));
+		return ranks;
+	}
+
+	const bestAggregate = useMemo(() => {
+		if (aggregates.length === 0) return null;
+		// Build arrays
+		const cpuPer = aggregates.map(a => a.cpuPerUnit);
+		const bytesPer = aggregates.map(a => a.bytesPerUnit);
+		const p99 = aggregates.map(a => a.avgDelayP99);
+		const jitter = aggregates.map(a => a.avgJitterMs);
+		const fresh = aggregates.map(a => a.avgFreshnessMs);
+		const elu = aggregates.map(a => a.avgElu);
+		// Ranks (lower is better for all)
+		const rCpu = rankValues(cpuPer, true);
+		const rBytes = rankValues(bytesPer, true);
+		const rP99 = rankValues(p99, true);
+		const rJit = rankValues(jitter, true);
+		const rFresh = rankValues(fresh, true);
+		const rElu = rankValues(elu, true);
+		// Weighted sum (weights ~ importance)
+		const weights = { cpu: 3, bytes: 2, p99: 3, jitter: 2, fresh: 1, elu: 2 } as const;
+		const scores = aggregates.map((_, i) =>
+			weights.cpu * rCpu[i] +
+			weights.bytes * rBytes[i] +
+			weights.p99 * rP99[i] +
+			weights.jitter * rJit[i] +
+			weights.fresh * rFresh[i] +
+			weights.elu * rElu[i]
+		);
+		let bestIdx = 0;
+		let bestScore = scores[0];
+		for (let i = 1; i < scores.length; i++) {
+			if (scores[i] < bestScore) {
+				bestScore = scores[i];
+				bestIdx = i;
+			}
+		}
+		return { item: aggregates[bestIdx], score: bestScore };
+	}, [aggregates]);
+
+	function colorFor(value: number, kind: "p99" | "elu" | "jitter" | "fresh", theme: any) {
+		if (kind === "p99") {
+			if (value < thresholds.p99MsGood) return theme.palette.success.main;
+			if (value < thresholds.p99MsWarn) return theme.palette.warning.main;
+			return theme.palette.error.main;
+		}
+		if (kind === "elu") {
+			if (value < thresholds.eluGood) return theme.palette.success.main;
+			if (value < thresholds.eluWarn) return theme.palette.warning.main;
+			return theme.palette.error.main;
+		}
+		if (kind === "jitter") {
+			if (value < thresholds.jitterGood) return theme.palette.success.main;
+			if (value < thresholds.jitterWarn) return theme.palette.warning.main;
+			return theme.palette.error.main;
+		}
+		// fresh
+		if (value < thresholds.freshGood) return theme.palette.success.main;
+		if (value < thresholds.freshWarn) return theme.palette.warning.main;
+		return theme.palette.error.main;
+	}
+
 	const overheadRatio = useMemo(() => {
 		const ws = aggregates.find(a => a.mode === "ws");
 		const http = aggregates.find(a => a.mode === "polling");
@@ -482,6 +563,31 @@ export default function SessionPanel() {
 
 	return (
 		<Box>
+			{/* Expectations & optimality summary */}
+			<Paper sx={{ p: 2, mb: 3 }}>
+				<Typography variant='subtitle1' gutterBottom>
+					Oczekiwane wyniki (kryteria) i optymalność
+				</Typography>
+				<Stack direction='row' spacing={1} sx={{ flexWrap: "wrap", mb: 1 }}>
+					<Chip color='success' variant='outlined' label='p99 opóźnienia < 20 ms (lepiej < 20, ostrzeżenie < 40)' />
+					<Chip color='success' variant='outlined' label='ELU < 0.5 (ostrz. < 0.7)' />
+					<Chip color='success' variant='outlined' label='Jitter inter-arrival niski (stabilny)' />
+					<Chip color='success' variant='outlined' label='CPU/jednostkę – jak najniżej' />
+					<Chip color='success' variant='outlined' label='Bajty/jednostkę – jak najniżej' />
+					<Chip color='success' variant='outlined' label='Świeżość danych – jak najniższa (ms)' />
+				</Stack>
+				{bestAggregate && (
+					<Alert severity='success'>
+						Najbardziej optymalna (wg powyższych kryteriów):
+						<strong> {bestAggregate.item.label}</strong> [{bestAggregate.item.mode === "ws" ? "WS" : "HTTP"}]
+					</Alert>
+				)}
+				<Typography variant='body2' sx={{ mt: 1 }}>
+					Skrót aspektów projektu badawczego: porównanie strategii dostarczania danych
+					(WebSocket push vs HTTP polling) pod kątem kosztu CPU, ELU/opóźnień pętli,
+					stabilności (jitter), narzutu bajtowego i świeżości danych.
+				</Typography>
+			</Paper>
 			<Typography variant='h6' gutterBottom>
 				Sesje pomiarowe
 			</Typography>
@@ -531,10 +637,14 @@ export default function SessionPanel() {
 											{a.avgRss.toFixed(1)}
 										</td>
 										<td style={{ padding: 4, textAlign: "right" }}>
-											{a.avgElu.toFixed(2)}
+											<span style={{ color: colorFor(a.avgElu, "elu", (window as any).muiTheme || ({} as any)) }}>
+												{a.avgElu.toFixed(2)}
+											</span>
 										</td>
 										<td style={{ padding: 4, textAlign: "right" }}>
-											{a.avgDelayP99.toFixed(1)}
+											<span style={{ color: colorFor(a.avgDelayP99, "p99", (window as any).muiTheme || ({} as any)) }}>
+												{a.avgDelayP99.toFixed(1)}
+											</span>
 										</td>
 										<td style={{ padding: 4, textAlign: "right" }}>
 											{a.avgRate.toFixed(2)}
@@ -552,7 +662,9 @@ export default function SessionPanel() {
 											{a.avgBytesPayload.toFixed(0)}
 										</td>
 										<td style={{ padding: 4, textAlign: "right" }}>
-											{a.avgJitterMs.toFixed(1)}
+											<span style={{ color: colorFor(a.avgJitterMs, "jitter", (window as any).muiTheme || ({} as any)) }}>
+												{a.avgJitterMs.toFixed(1)}
+											</span>
 										</td>
 									</tr>
 								))}
