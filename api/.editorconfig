@@ -1,0 +1,51 @@
+root = true
+
+# Global settings for all files
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 2
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+max_line_length = 80  # Typical limit for backend projects
+continuation_indent_size = 4  # For long expressions and objects
+
+# TypeScript (TS) and JavaScript (JS) files settings
+[*.js]
+[*.ts]
+indent_style = space
+indent_size = 2
+end_of_line = lf
+max_line_length = 80  # Shorter lines for better readability of backend code
+
+# JSON files settings (e.g. package.json, tsconfig.json)
+[*.json]
+indent_style = space
+indent_size = 2
+end_of_line = lf
+trim_trailing_whitespace = false  # JSON doesn't require removing trailing whitespace
+
+# Configuration files settings (e.g. .env, .editorconfig, .eslint)
+[*.env]
+indent_style = space
+indent_size = 2
+end_of_line = lf
+trim_trailing_whitespace = false
+
+[*.editorconfig]
+indent_style = space
+indent_size = 2
+end_of_line = lf
+insert_final_newline = true
+
+[*.eslint]
+indent_style = space
+indent_size = 2
+end_of_line = lf
+insert_final_newline = true
+
+# Markdown (documentation) files settings
+[*.md]
+trim_trailing_whitespace = false  # Spaces may be required in Markdown
+max_line_length = off

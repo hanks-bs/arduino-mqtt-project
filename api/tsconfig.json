@@ -1,0 +1,54 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "CommonJS",
+    "allowJs": true,
+    "maxNodeModuleJsDepth": 0,
+    "lib": ["es2020", "dom"],
+    "skipLibCheck": false,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": ".",
+    "moduleResolution": "node",
+    "removeComments": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "noImplicitThis": true,
+    "strict": true,
+    "useUnknownInCatchVariables": false,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "forceConsistentCasingInFileNames": true,
+
+    "typeRoots": [
+      "./src/types",
+      "./node_modules/@types",
+      "./node_modules/reflect-metadata"
+    ],
+    "types": ["reflect-metadata", "jest"],
+    "paths": {
+      "App/*": ["./src/*"],
+      "config/*": ["./src/config/*"],
+      "controllers/*": ["./src/controllers/*"],
+      "types/*": ["./src/types/*"],
+      "services/*": ["./src/services/*"],
+      "middlewares/*": ["./src/middlewares/*"],
+      "routes/*": ["./src/routes/*"],
+      "utils/*": ["./src/utils/*"],
+      "public/*": ["./src/public/*"]
+    },
+    "inlineSources": true,
+
+    "sourceRoot": "/"
+  },
+
+  "exclude": ["node_modules", "__tests__", "dist", ".vscode"],
+  "include": ["src", "package.json", "tsconfig.json"]
+}

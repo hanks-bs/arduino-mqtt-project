@@ -1,0 +1,7 @@
+# keep docs output but ignore other generated files
+# allow committing generated Typedoc site
+!/docs/
+# ignore everything else by default (empty dir tracked by .gitkeep)
+*
+!.gitignore
+!.gitkeep

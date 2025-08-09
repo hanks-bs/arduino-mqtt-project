@@ -1,0 +1,22 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "src/services/**/*.ts",
+    "src/controllers/**/*.ts",
+    "src/providers/**/*.ts",
+    "src/rateLimiters/**/*.ts",
+    "src/types/**/*.ts"
+  ],
+  "exclude": [
+    "**/__tests__/**",
+    "**/*.test.ts"
+  ],
+  "tsconfig": "tsconfig.json",
+  "out": "public/docs",
+  "excludeExternals": false,
+  "excludePrivate": true,
+  "excludeProtected": false,
+  "readme": "README.md",
+  "sort": ["source-order", "enum-value-ascending"],
+  "plugin": []
+}
