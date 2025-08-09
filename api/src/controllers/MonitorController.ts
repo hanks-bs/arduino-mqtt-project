@@ -69,7 +69,11 @@ class MonitorController {
         mode: body.mode,
         pollingIntervalMs: body.pollingIntervalMs,
         sampleCount: body.sampleCount,
-        durationSec: body.durationSec,
+  durationSec: body.durationSec,
+  warmupSec: body.warmupSec,
+  cooldownSec: body.cooldownSec,
+  wsFixedRateHz: body.wsFixedRateHz,
+  assumedPayloadBytes: body.assumedPayloadBytes,
       };
       const rec = ResourceMonitor.startSession(cfg);
       return res.status(201).json({ success: true, data: rec });

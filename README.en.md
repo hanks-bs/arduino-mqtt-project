@@ -106,6 +106,7 @@ LIVE_EMIT_ENABLED=1         # 0 disables real-time WS emissions (alias: LIVE_REA
 
 ```env
 NEXT_PUBLIC_WS_URL=ws://localhost:5000
+NEXT_PUBLIC_API_BASE=http://localhost:5000
 ```
 
 ### Serial Bridge (serial-bridge/.env)
@@ -178,6 +179,42 @@ Sessions can record these samples and optionally drive deterministic HTTP pollin
 
 - Use the live‑emit toggle to disable real‑time WS emissions during measurements: env `LIVE_EMIT_ENABLED=0` or POST `/api/monitor/live-emit` with `{ enabled:false }`.
 - Compare WS vs HTTP polling by running sessions with identical durations/intervals; export CSV and analyze jitter, bytes/s, CPU.
+
+---
+
+## Benchmarks, export and research doc
+
+The API provides a complete measurement pipeline, export, and auto‑update of the research document.
+
+- Run the full measurement suite (artifacts under `api/benchmarks/<timestamp>/`):
+  - `yarn measure` (from `api/`)
+- Artifacts per run:
+  - `sessions.csv` — flattened per‑second samples for WS and HTTP
+  - `summary.json` — aggregates (averages, p99, jitter, freshness)
+  - `README.md` — human‑readable summary mapped to the dashboard
+- Update the research document with the latest results (auto section in `docs/ASPEKT_BADAWCZY.md`):
+  - `yarn docs:research:update` (from `api/`)
+
+Notes:
+
+- To reduce noise, temporarily disable real‑time emissions: `LIVE_EMIT_ENABLED=0` or `POST /api/monitor/live-emit` with `{ enabled:false }`.
+- You can tune parameters and tolerances in `api/src/scripts/measurementRunner.ts`.
+
+---
+
+## Dashboard integration (proposal)
+
+To expose measurements in the UI:
+
+- “Latest Benchmark” — tile/link pointing at the newest folder with `sessions.csv`, `summary.json`, and `README.md`.
+- “Run Measurements” (dev‑only) — button calling an API endpoint to start a run and refresh the tile upon completion.
+- “Trends” — charts across multiple runs (avg wsMsgRate/httpReqRate, bytes/s, EL delay p99, jitter) over time.
+
+Optional API endpoints:
+
+- `GET /api/benchmarks/latest` — returns metadata and paths of the newest run.
+- `GET /api/benchmarks/trends` — aggregates `summary.json` across `api/benchmarks/**` for trends visualization.
+- Serve the `api/benchmarks/` directory statically (CSV/README downloadable from the UI).
 
 ---
 

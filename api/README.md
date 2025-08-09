@@ -28,6 +28,8 @@ Lightweight TypeScript/Express backend that ingests real‑time Arduino sensor d
 16. [Security Notes](#security-notes)
 17. [Troubleshooting](#troubleshooting)
 18. [License](#license)
+19. [Benchmarks & Measurement](#benchmarks--measurement)
+20. [Dashboard Integration (Proposal)](#dashboard-integration-proposal)
 
 ---
 
@@ -211,6 +213,8 @@ Arduino payload shape (per line before enrichment):
 | POST | `/api/monitor/live-emit` | Toggle real‑time emissions: body `{ enabled: boolean }` |
 | GET | `/api/monitor/sessions/export/csv` | Export flattened session metrics as CSV |
 
+CSV columns (excerpt): `timestamp, sessionId, mode, httpReqRate, wsMsgRate, bytesPerSec, cpu, rss, elu, evLoopDelayP99, jitterMs, freshnessMs, wsClients`.
+
 ### WebSockets Events
 
 | Event | Payload | Description |
@@ -313,6 +317,41 @@ Recommended additional test areas:
 - Payload validation & error paths in `MqttSubscriber`.
 - Session start/stop edge cases.
 - Rate limiter behaviours.
+
+---
+
+## Benchmarks & Measurement
+
+This project includes a simple but reproducible measurement pipeline to compare WS vs HTTP polling:
+
+- Run a full measurement suite (creates artifacts under `benchmarks/<timestamp>/`):
+  - `yarn measure`
+- Artifacts per run:
+  - `sessions.csv` — flattened per‑second samples for both modes
+  - `summary.json` — aggregated metrics (avg rates, bytes/unit, EL delay p99, jitter, freshness)
+  - `README.md` — human‑readable summary mapped to the dashboard views
+- Update the research document (inject latest results into `docs/ASPEKT_BADAWCZY.md`):
+  - `yarn docs:research:update`
+
+Notes:
+
+- To reduce noise during measurements, temporarily disable live emissions with `LIVE_EMIT_ENABLED=0` or via `POST /api/monitor/live-emit`.
+- Intervals and tolerances are configurable in the measurement script (`src/scripts/measurementRunner.ts`).
+
+---
+
+## Dashboard Integration (Proposal)
+
+Optional endpoints to surface benchmarks in the UI:
+
+- `GET /api/benchmarks/latest` — returns metadata and links to the newest run (CSV/JSON/README).
+- `GET /api/benchmarks/trends` — aggregates `summary.json` across runs to feed a trends chart (e.g., avg wsMsgRate, bytesPerSec, EL p99).
+- Serve `benchmarks/` as static files for direct download from the dashboard.
+
+Client can then render:
+
+- “Latest Benchmark” tile with quick links.
+- “Trends” tab comparing WS vs HTTP over time with confidence bands.
 
 ---
 

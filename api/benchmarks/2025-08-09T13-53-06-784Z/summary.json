@@ -1,0 +1,108 @@
+{
+  "summaries": [
+    {
+      "id": "8531291d-6ec4-40e3-b0b4-e65dc2da2515",
+      "label": "WS@1Hz payload=360B",
+      "mode": "ws",
+      "count": 4,
+      "avgCpu": 1.175,
+      "avgRss": 196.2109375,
+      "avgElu": 0.04526707976778127,
+      "avgDelayP99": 48.889855,
+      "avgRate": 0.7018926599798492,
+      "avgBytesRate": 252.68135759274574,
+      "avgPayload": 270,
+      "bytesPerUnit": 360.00000000000006,
+      "avgJitterMs": 17.229760660214865,
+      "avgFreshnessMs": 613.75,
+      "checks": [
+        "rate=0.70 in [0.50, 1.50]",
+        "bytesPerUnit=360.0 in [180.0, 540.0]"
+      ],
+      "rateOk": true,
+      "payloadOk": true,
+      "expectedRate": 1,
+      "expectedPayload": 360,
+      "tolRate": 0.5,
+      "tolPayload": 0.5
+    },
+    {
+      "id": "0722fbd6-73ed-4992-afa5-21b7867efe1a",
+      "label": "WS@2Hz payload=360B",
+      "mode": "ws",
+      "count": 6,
+      "avgCpu": 2.0833333333333335,
+      "avgRss": 196.369140625,
+      "avgElu": 0.037748443961462035,
+      "avgDelayP99": 49.364991,
+      "avgRate": 0.909432603340835,
+      "avgBytesRate": 327.39573720270056,
+      "avgPayload": 360,
+      "bytesPerUnit": 359.99999999999994,
+      "avgJitterMs": 444.93402339467633,
+      "avgFreshnessMs": 412.5,
+      "checks": [
+        "rate=0.91 in [1.00, 3.00]",
+        "bytesPerUnit=360.0 in [180.0, 540.0]"
+      ],
+      "rateOk": false,
+      "payloadOk": true,
+      "expectedRate": 2,
+      "expectedPayload": 360,
+      "tolRate": 0.5,
+      "tolPayload": 0.5
+    },
+    {
+      "id": "a1f3b59c-cc9f-47de-bab5-266f4c97a3a2",
+      "label": "HTTP@1Hz payload=420B",
+      "mode": "polling",
+      "count": 6,
+      "avgCpu": 9.383333333333333,
+      "avgRss": 182.88411458333334,
+      "avgElu": 0.04167681266631165,
+      "avgDelayP99": 49.954814999999996,
+      "avgRate": 0.4134828731602925,
+      "avgBytesRate": 173.66280672732285,
+      "avgPayload": 350,
+      "bytesPerUnit": 420,
+      "avgJitterMs": 0.31030121992763315,
+      "avgFreshnessMs": 719.3333333333334,
+      "checks": [
+        "rate=0.41 in [0.50, 1.50]",
+        "bytesPerUnit=420.0 in [210.0, 630.0]"
+      ],
+      "rateOk": false,
+      "payloadOk": true,
+      "expectedRate": 1,
+      "expectedPayload": 420,
+      "tolRate": 0.5,
+      "tolPayload": 0.5
+    },
+    {
+      "id": "8d19f2ff-7ed4-4d62-90a9-d685e211f67c",
+      "label": "HTTP@2Hz payload=420B",
+      "mode": "polling",
+      "count": 6,
+      "avgCpu": 2.3333333333333335,
+      "avgRss": 174.75846354166666,
+      "avgElu": 0.04123180604241871,
+      "avgDelayP99": 48.83524166666667,
+      "avgRate": 0.8265556263821013,
+      "avgBytesRate": 347.1533630804825,
+      "avgPayload": 350,
+      "bytesPerUnit": 419.99999999999994,
+      "avgJitterMs": 280.2291559510926,
+      "avgFreshnessMs": 425.6666666666667,
+      "checks": [
+        "rate=0.83 in [1.00, 3.00]",
+        "bytesPerUnit=420.0 in [210.0, 630.0]"
+      ],
+      "rateOk": false,
+      "payloadOk": true,
+      "expectedRate": 2,
+      "expectedPayload": 420,
+      "tolRate": 0.5,
+      "tolPayload": 0.5
+    }
+  ]
+}

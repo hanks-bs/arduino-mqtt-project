@@ -61,6 +61,14 @@ export interface SessionConfig {
   sampleCount?: number;
   /** Optional: stop after duration seconds. */
   durationSec?: number;
+  /** Optional: ignore initial N seconds in analysis (stabilization). */
+  warmupSec?: number;
+  /** Optional: ignore last N seconds in analysis (cooldown). */
+  cooldownSec?: number;
+  /** Optional: for WS sessions, run a controlled driver at fixed rate (Hz). */
+  wsFixedRateHz?: number;
+  /** Optional: assumed payload bytes if no observed Arduino payload yet (used by controlled WS). */
+  assumedPayloadBytes?: number;
 }
 
 export interface SessionRecord {
@@ -128,10 +136,25 @@ class ResourceMonitorService {
   private tickInterval: NodeJS.Timeout | null = null;
   private histogram = monitorEventLoopDelay({ resolution: 20 });
   private lastElu: ELU = performance.eventLoopUtilization();
+  private readonly monitorTickMs: number = (() => {
+    const v = Number(
+      process.env.MONITOR_TICK_MS ||
+        process.env.LIVE_MONITOR_TICK_MS ||
+        1000,
+    );
+    return Number.isFinite(v) && v >= 200 ? v : 1000;
+  })();
 
   // sessions
   private sessions = new Map<string, SessionRecord>();
   private activeSessionId: string | null = null;
+  // remember previous liveEmit flag when forcing it during 'ws' sessions
+  private prevLiveEmitBeforeSession: boolean | null = null;
+  private forcedEmitForSession: boolean = false;
+  // controlled WS driver state (for fair comparison at fixed rate)
+  private wsDriverTimer: NodeJS.Timeout | null = null;
+  private isWsControlled: boolean = false;
+  private lastArduinoPayloadBytes: number = 400; // updated by noteArduinoPayloadSize
 
   // internal HTTP polling driver for measurement sessions
   private selfPollTimer: NodeJS.Timeout | null = null;
@@ -153,10 +176,27 @@ class ResourceMonitorService {
     } catch {}
 
     if (!this.tickInterval) {
-      this.tickInterval = setInterval(() => this.tick(), 1000);
+      this.tickInterval = setInterval(() => this.tick(), this.monitorTickMs);
       // do not keep the process alive solely because of this timer
       this.tickInterval.unref();
     }
+  }
+
+  /**
+   * Stops internal timers and drivers. Use in tests to avoid leaks.
+   */
+  shutdown() {
+    try {
+      if (this.tickInterval) {
+        clearInterval(this.tickInterval);
+        this.tickInterval = null;
+      }
+      try {
+        this.histogram.disable();
+      } catch {}
+      this.stopSelfPolling();
+      this.stopWsDriver();
+    } catch {}
   }
 
   /**
@@ -199,9 +239,19 @@ class ResourceMonitorService {
     return this.liveEmitEnabled;
   }
 
+  /** Returns whether a controlled WS driver is active (session-fixed mode). */
+  isWsControlledMode(): boolean {
+    return this.isWsControlled;
+  }
+
   /** Updates last Arduino timestamp for data freshness calculations. */
   setLastArduinoTimestamp(ts: string) {
     this.lastArduinoTimestamp = ts;
+  }
+
+  /** Inform the monitor about the last observed Arduino payload size (bytes). */
+  noteArduinoPayloadSize(bytes: number) {
+    if (Number.isFinite(bytes) && bytes > 0) this.lastArduinoPayloadBytes = bytes;
   }
 
   /**
@@ -259,6 +309,18 @@ class ResourceMonitorService {
       this.startSelfPolling(every);
     } else {
       this.stopSelfPolling(); // ensure it's off
+      // ensure WS emissions are enabled during a WS session
+      if (this.prevLiveEmitBeforeSession === null) {
+        this.prevLiveEmitBeforeSession = this.liveEmitEnabled;
+      }
+  // mark if we actually force-enable (so we know whether to restore later)
+  this.forcedEmitForSession = !this.liveEmitEnabled;
+  if (this.forcedEmitForSession) this.setLiveEmitEnabled(true);
+      // optional controlled WS driver at fixed rate
+      const hz = cfg.wsFixedRateHz && cfg.wsFixedRateHz > 0 ? cfg.wsFixedRateHz : 0;
+      if (hz > 0) {
+        this.startWsDriver(hz, cfg.assumedPayloadBytes);
+      }
     }
 
     // optional duration guard
@@ -284,6 +346,20 @@ class ResourceMonitorService {
     if (rec.config.mode === 'polling') {
       this.stopSelfPolling();
     }
+    if (rec.config.mode === 'ws') {
+      this.stopWsDriver();
+    }
+    // restore previous WS emission flag after a WS session ends
+    if (
+      rec.config.mode === 'ws' &&
+      this.prevLiveEmitBeforeSession !== null &&
+      this.forcedEmitForSession
+    ) {
+      this.setLiveEmitEnabled(this.prevLiveEmitBeforeSession);
+    }
+    // clear remembered state
+    this.prevLiveEmitBeforeSession = null;
+    this.forcedEmitForSession = false;
     return rec;
   }
 
@@ -296,6 +372,13 @@ class ResourceMonitorService {
     this.sessions.clear();
     this.activeSessionId = null;
     this.stopSelfPolling();
+  this.stopWsDriver();
+    // restore emission flag if it was overridden
+    if (this.prevLiveEmitBeforeSession !== null && this.forcedEmitForSession) {
+      this.setLiveEmitEnabled(this.prevLiveEmitBeforeSession);
+    }
+    this.prevLiveEmitBeforeSession = null;
+    this.forcedEmitForSession = false;
     return count;
   }
 
@@ -485,6 +568,33 @@ class ResourceMonitorService {
       clearInterval(this.selfPollTimer);
       this.selfPollTimer = null;
     }
+  }
+
+  /** Starts a controlled WS driver at fixed rate, incrementing WS counters fairly. */
+  private startWsDriver(hz: number, assumedBytes?: number) {
+    this.stopWsDriver();
+    const every = Math.max(5, Math.floor(1000 / hz));
+    this.isWsControlled = true;
+    const payloadBytes = Math.max(1, Math.floor(assumedBytes || this.lastArduinoPayloadBytes));
+    const doOnce = () => {
+      try {
+        // Count WS emission with approximate payload size; keep freshness up-to-date
+        this.onWsEmit(payloadBytes);
+        this.setLastArduinoTimestamp(new Date().toISOString());
+      } catch {}
+    };
+    doOnce();
+    this.wsDriverTimer = setInterval(doOnce, every);
+    this.wsDriverTimer.unref();
+  }
+
+  /** Stops the controlled WS driver if running. */
+  private stopWsDriver() {
+    if (this.wsDriverTimer) {
+      clearInterval(this.wsDriverTimer);
+      this.wsDriverTimer = null;
+    }
+    this.isWsControlled = false;
   }
 
   /** Maintains a bounded rolling window of recent intervals */

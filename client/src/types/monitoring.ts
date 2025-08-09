@@ -40,6 +40,14 @@ export interface SessionConfig {
 	pollingIntervalMs?: number;
 	sampleCount?: number;
 	durationSec?: number;
+	/** Pomijaj pierwsze N sekund (stabilizacja) */
+	warmupSec?: number;
+	/** Pomijaj ostatnie N sekund (cooldown) */
+	cooldownSec?: number;
+	/** Dla WS: kontrolowany driver z ustaloną częstotliwością (Hz) */
+	wsFixedRateHz?: number;
+	/** Założony rozmiar payloadu w bajtach (gdy brak realnego) */
+	assumedPayloadBytes?: number;
 }
 
 export interface SessionRecord {

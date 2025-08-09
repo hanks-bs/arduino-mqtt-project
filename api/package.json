@@ -14,6 +14,9 @@
     "watch": "tsc -w",
     "start": "node dist/src/app.js",
     "dev": "nodemon --exec ts-node -r tsconfig-paths/register ./src/app.ts",
+    "harness": "ts-node -r tsconfig-paths/register ./src/scripts/reliabilityHarness.ts",
+  "measure": "ts-node -r tsconfig-paths/register ./src/scripts/measurementRunner.ts",
+  "docs:research:update": "ts-node -r tsconfig-paths/register ./src/scripts/updateResearchDoc.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
@@ -21,8 +24,8 @@
     "lint:fix": "eslint 'src/**/*.{js,ts}' --fix",
     "prettier": "prettier 'src/**/*.{js,ts,json}' --check",
     "prettier:fix": "prettier 'src/**/*.{js,ts,json}' --write",
-  "format": "npm run prettier:fix && npm run lint:fix",
-  "docs": "typedoc --options typedoc.json"
+    "format": "npm run prettier:fix && npm run lint:fix",
+    "docs": "typedoc --options typedoc.json"
   },
   "dependencies": {
     "@babel/preset-env": "^7.25.4",
@@ -54,6 +57,7 @@
     "@types/lodash": "^4.17.10",
     "@types/morgan": "^1.9.4",
     "@types/pidusage": "^2.0.5",
+    "@types/supertest": "^6.0.3",
     "@typescript-eslint/eslint-plugin": "^6.10.0",
     "@typescript-eslint/parser": "^6.10.0",
     "eslint-config-airbnb-base": "^15.0.0",
@@ -61,14 +65,16 @@
     "eslint-import-resolver-typescript": "^3.6.1",
     "eslint-plugin-import": "^2.29.0",
     "eslint-plugin-prettier": "^5.0.1",
-    "prettier": "^3.0.3",
-    "ts-node": "^10.9.2",
-    "tsconfig-paths": "^4.1.2",
     "nodemon": "^2.0.20",
+    "prettier": "^3.0.3",
+    "supertest": "^7.1.4",
+  "socket.io-client": "^4.8.1",
     "ts-jest": "^29.2.5",
-  "typescript": "^5.3.3",
-  "tsc-alias": "^1.8.8",
-  "typedoc": "^0.25.13"
+    "ts-node": "^10.9.2",
+    "tsc-alias": "^1.8.8",
+    "tsconfig-paths": "^4.1.2",
+    "typedoc": "^0.25.13",
+    "typescript": "^5.3.3"
   },
   "license": "unlicensed",
   "repository": "https://github.com/hanks-bs/arduino-mqtt-project-api"

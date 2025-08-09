@@ -10,17 +10,28 @@ import {
 	Alert,
 	Box,
 	Button,
+	Card,
+	CardActions,
+	CardContent,
+	CardHeader,
 	Chip,
 	Checkbox,
 	Divider,
 	FormControlLabel,
 	Grid,
-	MenuItem,
 	Paper,
 	Stack,
 	TextField,
+	Tab,
+	Tabs,
 	Tooltip,
 	Typography,
+	Accordion,
+	AccordionSummary,
+	AccordionDetails,
+	ToggleButton,
+	ToggleButtonGroup,
+	InputAdornment,
 } from "@mui/material";
 import type { ApexOptions } from "apexcharts";
 import { useTheme } from "@mui/material/styles";
@@ -31,6 +42,14 @@ const Chart = dynamic(() => import("react-apexcharts"), { ssr: false });
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5000";
 const API = API_BASE;
+
+// Color palette constants (module-level for stable identity)
+const BASE_HUE: Record<"ws" | "polling", number> = { ws: 210, polling: 280 };
+const SAT: Record<"ws" | "polling", number> = { ws: 70, polling: 65 };
+const LIGHT_BASE: Record<"ws" | "polling", number> = { ws: 45, polling: 50 };
+const HUE_STEP = 24; // degrees step between sessions of the same mode
+const hslColor = (h: number, s: number, l: number) =>
+	`hsl(${Math.round(h % 360)}, ${Math.round(s)}%, ${Math.round(l)}%)`;
 
 /* -------------------------------------------------------------------------------------------------
  * Helpers
@@ -112,6 +131,7 @@ export default function SessionPanel() {
 	const [sessions, setSessions] = useState<SessionRecord[]>([]);
 	const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 	const [loading, setLoading] = useState(false);
+	const [tab, setTab] = useState<'quick' | 'advanced'>('quick');
 
 	// New session form
 	const [label, setLabel] = useState("Test 1");
@@ -119,6 +139,75 @@ export default function SessionPanel() {
 	const [pollMs, setPollMs] = useState(2000);
 	const [sampleCount, setSampleCount] = useState(120);
 	const [durationSec, setDurationSec] = useState<number | undefined>(undefined);
+	const [warmupSec, setWarmupSec] = useState<number>(0);
+	const [cooldownSec, setCooldownSec] = useState<number>(0);
+	const [wsFixedRateHz, setWsFixedRateHz] = useState<number | undefined>(undefined);
+	const [assumedPayloadBytes, setAssumedPayloadBytes] = useState<number | undefined>(undefined);
+
+	// Presets: predefiniowane profile testowe
+	type Preset = {
+		name: string;
+		cfg: Partial<SessionConfig> & { mode: "ws" | "polling" };
+	};
+	const PRESETS: Preset[] = [
+		{
+			name: "WS 1 Hz (baseline)",
+			cfg: { mode: "ws", wsFixedRateHz: 1, durationSec: 120, warmupSec: 10, cooldownSec: 5 },
+		},
+		{
+			name: "HTTP 1 Hz",
+			cfg: { mode: "polling", pollingIntervalMs: 1000, durationSec: 120, warmupSec: 10, cooldownSec: 5 },
+		},
+		{
+			name: "WS 2 Hz",
+			cfg: { mode: "ws", wsFixedRateHz: 2, durationSec: 120, warmupSec: 10, cooldownSec: 5 },
+		},
+		{
+			name: "HTTP 500 ms (2 Hz)",
+			cfg: { mode: "polling", pollingIntervalMs: 500, durationSec: 120, warmupSec: 10, cooldownSec: 5 },
+		},
+	];
+
+	const applyPreset = (p: Preset) => {
+		setMode(p.cfg.mode);
+		setDurationSec(p.cfg.durationSec);
+		setWarmupSec(p.cfg.warmupSec ?? 0);
+		setCooldownSec(p.cfg.cooldownSec ?? 0);
+		if (p.cfg.mode === "polling") {
+			setPollMs(p.cfg.pollingIntervalMs ?? 1000);
+			setWsFixedRateHz(undefined);
+			setAssumedPayloadBytes(undefined);
+		} else {
+			setWsFixedRateHz(p.cfg.wsFixedRateHz);
+			setAssumedPayloadBytes(p.cfg.assumedPayloadBytes);
+		}
+		if (p.cfg.durationSec && !label) setLabel(p.name);
+	};
+
+	const startPreset = async (p: Preset) => {
+		if (activeSession) return; // guard: one at a time
+		setLoading(true);
+		try {
+			const cfg: SessionConfig = {
+				label: p.name,
+				mode: p.cfg.mode,
+				pollingIntervalMs: p.cfg.mode === 'polling' ? (p.cfg.pollingIntervalMs ?? 1000) : pollMs,
+				sampleCount,
+				durationSec: p.cfg.durationSec,
+				warmupSec: p.cfg.warmupSec ?? 0,
+				cooldownSec: p.cfg.cooldownSec ?? 0,
+				wsFixedRateHz: p.cfg.mode === 'ws' ? p.cfg.wsFixedRateHz : undefined,
+				assumedPayloadBytes: p.cfg.mode === 'ws' ? p.cfg.assumedPayloadBytes : undefined,
+			};
+			await fetchJSON<SessionRecord>(`${API}/api/monitor/start`, {
+				method: "POST",
+				body: JSON.stringify(cfg),
+			});
+			await reload();
+		} finally {
+			setLoading(false);
+		}
+	};
 
 	const reload = useCallback(async () => {
 		const list = await fetchJSON<SessionRecord[]>(
@@ -147,7 +236,7 @@ export default function SessionPanel() {
 
 	useEffect(() => {
 		reload().catch(console.error);
-		const it = setInterval(reload, 5000);
+		const it = setInterval(reload, 1500); // częstszy refresh sesji
 		return () => clearInterval(it);
 	}, [reload]);
 
@@ -175,6 +264,10 @@ export default function SessionPanel() {
 				pollingIntervalMs: pollMs,
 				sampleCount,
 				durationSec,
+				warmupSec,
+				cooldownSec,
+				wsFixedRateHz,
+				assumedPayloadBytes,
 			};
 			await fetchJSON<SessionRecord>(`${API}/api/monitor/start`, {
 				method: "POST",
@@ -250,8 +343,13 @@ export default function SessionPanel() {
 
 	const aggregates: Aggregates[] = useMemo(() => {
 		return selectedSessions.map(s => {
-			const n = s.samples.length || 1;
-			const sum = s.samples.reduce(
+			// apply warmup/cooldown trimming (approx per-second samples)
+			const warm = Math.max(0, Math.floor((s.config.warmupSec || 0)));
+			const cool = Math.max(0, Math.floor((s.config.cooldownSec || 0)));
+			const trimmed = s.samples.slice(warm, s.samples.length - cool || undefined);
+			const samples = trimmed.length > 0 ? trimmed : s.samples;
+			const n = samples.length || 1;
+			const sum = samples.reduce(
 				(acc, m) => {
 					acc.cpu += m.cpu;
 					acc.rss += m.rssMB;
@@ -421,16 +519,42 @@ export default function SessionPanel() {
 		}));
 	}, [selectedSessions]);
 
-	// Helper: map mode to color for consistent legend coloring
-	const modeColor = (mode: "ws" | "polling") =>
-		mode === "ws" ? theme.palette.info.main : theme.palette.secondary.main;
-	const modeColorLight = (mode: "ws" | "polling") =>
-		mode === "ws" ? theme.palette.info.light : theme.palette.secondary.light;
-	const modeColorStrong = modeColor;
+	// Advanced color palette: distinct colors per session within the same mode
 
-	// Colors arrays matching series ordering
-	const colorsForSeries = (items: { mode: "ws" | "polling" }[]) =>
-		items.map(i => modeColor(i.mode));
+	// Compute per-session ordinal within its mode, to generate stable colors
+	const modeOrdinals = useMemo(() => {
+		const counters: Record<"ws" | "polling", number> = { ws: 0, polling: 0 };
+		return selectedSessions.map(s => {
+			const idx = counters[s.config.mode]++;
+			return idx;
+		});
+	}, [selectedSessions]);
+
+	const baseColorsForSelected = useMemo(() => {
+		return selectedSessions.map((s, i) => {
+			const ord = modeOrdinals[i];
+	    const h = BASE_HUE[s.config.mode] + ord * HUE_STEP;
+	    const c = hslColor(h, SAT[s.config.mode], LIGHT_BASE[s.config.mode]);
+			return c;
+		});
+    }, [selectedSessions, modeOrdinals]);
+
+	const heapColorsForSelected = useMemo(() => {
+		// lighter variant for Heap per session
+		return selectedSessions.map((s, i) => {
+			const ord = modeOrdinals[i];
+	    const h = BASE_HUE[s.config.mode] + ord * HUE_STEP;
+	    const c = hslColor(h, SAT[s.config.mode], Math.min(85, LIGHT_BASE[s.config.mode] + 18));
+			return c;
+		});
+    }, [selectedSessions, modeOrdinals]);
+
+	// Colors arrays matching series ordering (single-metric charts)
+	const colorsForSeries = (items: { mode: "ws" | "polling" }[]) => {
+		// map items to the corresponding color of the same session order
+		// items should correspond 1:1 with selectedSessions order
+		return items.map((_, i) => baseColorsForSelected[i] || theme.palette.text.primary);
+	};
 
 	// Memory (RSS + Heap) — two physical sub-metrics, still acceptable to plot together
 	const memSeries = useMemo(() => {
@@ -565,8 +689,8 @@ export default function SessionPanel() {
 	const memOptions: ApexOptions = {
 		...baseOptions("Pamięć procesu (MB)", "MB"),
 		colors: [
-			...selectedSessions.map(s => modeColorStrong(s.config.mode)), // RSS
-			...selectedSessions.map(s => modeColorLight(s.config.mode)), // Heap
+			...baseColorsForSelected, // RSS per session
+			...heapColorsForSelected, // Heap per session (lighter)
 		],
 		stroke: {
 			curve: "smooth",
@@ -890,90 +1014,233 @@ export default function SessionPanel() {
 				</Alert>
 			)}
 
-			{/* Control panel */}
+			{/* Control panel with Tabs */}
 			<Paper sx={{ p: 2, mb: 2 }}>
-				<Stack spacing={2}>
-					<Typography variant='subtitle1'>Nowa sesja</Typography>
-					<Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-						<TextField
-							label='Etykieta'
-							value={label}
-							onChange={e => setLabel(e.target.value)}
-							fullWidth
-						/>
-						<TextField
-							label='Tryb'
-							value={mode}
-							onChange={e => setMode(e.target.value as any)}
-							select
-							sx={{ minWidth: 180 }}>
-							<MenuItem value='ws'>WebSocket</MenuItem>
-							<MenuItem value='polling'>HTTP</MenuItem>
-						</TextField>
-						<TextField
-							label='Interwał pollingu (ms)'
-							type='number'
-							value={pollMs}
-							onChange={e => setPollMs(Number(e.target.value))}
-							disabled={mode !== "polling"}
-						/>
-						<TextField
-							label='Liczba próbek'
-							type='number'
-							value={sampleCount}
-							onChange={e => setSampleCount(Number(e.target.value))}
-						/>
-						<TextField
-							label='Czas trwania (s) – opcjonalnie'
-							type='number'
-							value={durationSec ?? ""}
-							onChange={e =>
-								setDurationSec(
-									e.target.value ? Number(e.target.value) : undefined
-								)
-							}
-						/>
-					</Stack>
-					<Stack
-						direction='row'
-						spacing={2}
-						alignItems='center'
-						flexWrap='wrap'>
-						<Button
-							variant='contained'
-							onClick={start}
-							disabled={loading || !!activeSession}
-							title={activeSession ? "Najpierw zakończ bieżącą sesję" : ""}>
-							Start
-						</Button>
-						{activeSession && (
-							<Button
-								color='warning'
-								variant='outlined'
-								onClick={() => stop(activeSession.id)}
-								disabled={loading}>
-								Stop
-							</Button>
-						)}
-						<Button
-							color='error'
-							variant='outlined'
-							onClick={resetAll}
-							disabled={loading}>
-							Resetuj sesje
-						</Button>
-						<Tooltip title='Eksportuje wszystkie sesje (w tym próbki) do pliku JSON'>
-							<span>
-								<Button
-									variant='outlined'
-									onClick={exportSessions}
-									disabled={sessions.length === 0}>
-									Eksport JSON
+				<Typography variant='subtitle1' sx={{ mb: 1 }}>Nowa sesja</Typography>
+				<Tabs
+					value={tab}
+					onChange={(_, v) => setTab(v)}
+					textColor='primary'
+					indicatorColor='primary'
+					sx={{ mb: 2 }}
+				>
+					<Tab value='quick' label='Quick Start' />
+					<Tab value='advanced' label='Konfiguracja' />
+				</Tabs>
+				{tab === 'quick' && (
+					<Box>
+						<Grid container spacing={2}>
+							{PRESETS.map(p => (
+								<Grid key={p.name} size={{ xs: 12, md: 6 }}>
+									<Card variant='outlined'>
+										<CardHeader title={p.name} subheader={p.cfg.mode === 'ws' ? 'WebSocket' : 'HTTP'} />
+										<CardContent>
+											<Stack spacing={1}>
+												<Typography variant='body2'>
+													Czas: {p.cfg.durationSec ?? 120}s, Warmup: {p.cfg.warmupSec ?? 10}s, Cooldown: {p.cfg.cooldownSec ?? 5}s
+												</Typography>
+												{p.cfg.mode === 'ws' ? (
+													<Typography variant='body2'>Rate: {p.cfg.wsFixedRateHz ?? 'auto'} Hz</Typography>
+												) : (
+													<Typography variant='body2'>Polling: {p.cfg.pollingIntervalMs ?? 1000} ms</Typography>
+												)}
+											</Stack>
+										</CardContent>
+										<CardActions>
+											<Button
+												variant='contained'
+												size='small'
+												onClick={() => startPreset(p)}
+												disabled={loading || !!activeSession}
+												title={activeSession ? 'Najpierw zakończ bieżącą sesję' : ''}
+											>
+												Start
+											</Button>
+											<Button
+												variant='outlined'
+												size='small'
+												onClick={() => { applyPreset(p); setTab('advanced'); }}
+											>
+												Dostosuj
+											</Button>
+										</CardActions>
+									</Card>
+								</Grid>
+							))}
+						</Grid>
+					</Box>
+				)}
+				{tab === 'advanced' && (
+					<Stack spacing={2}>
+						<Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ flexWrap: 'wrap' }}>
+							{PRESETS.map(p => (
+								<Button key={p.name} size='small' variant='outlined' onClick={() => applyPreset(p)}>
+									{p.name}
 								</Button>
-							</span>
-						</Tooltip>
+							))}
+						</Stack>
+						<Grid container spacing={2} alignItems='center'>
+							<Grid size={{ xs: 12, md: 6 }}>
+								<TextField
+									label='Etykieta'
+									value={label}
+									onChange={e => setLabel(e.target.value)}
+									fullWidth
+								/>
+							</Grid>
+							<Grid size={{ xs: 12, md: 6 }}>
+								<Stack direction='row' alignItems='center' spacing={1}>
+									<Typography variant='body2' sx={{ minWidth: 44 }}>Tryb</Typography>
+									<ToggleButtonGroup
+										color='primary'
+										exclusive
+										value={mode}
+										onChange={(_, val) => val && setMode(val)}
+										size='small'>
+										<ToggleButton value='ws'>WebSocket</ToggleButton>
+										<ToggleButton value='polling'>HTTP</ToggleButton>
+									</ToggleButtonGroup>
+								</Stack>
+							</Grid>
+							{mode === 'polling' ? (
+								<Grid size={{ xs: 12, md: 6 }}>
+									<TextField
+										label='Interwał odpytywania (HTTP)'
+										type='number'
+										value={pollMs}
+										onChange={e => setPollMs(Number(e.target.value))}
+										InputProps={{ endAdornment: <InputAdornment position='end'>ms</InputAdornment> }}
+										helperText='Częstotliwość zapytań HTTP (niżej = częściej).'
+									/>
+								</Grid>
+							) : (
+								<>
+									<Grid size={{ xs: 12, md: 6 }}>
+										<TextField
+											label='Częstotliwość WS (stała)'
+											type='number'
+											value={wsFixedRateHz ?? ''}
+											onChange={e => setWsFixedRateHz(e.target.value ? Number(e.target.value) : undefined)}
+											InputProps={{ endAdornment: <InputAdornment position='end'>Hz</InputAdornment> }}
+											helperText='Opcjonalny kontrolowany driver WS do uczciwego porównania z HTTP.'
+										/>
+									</Grid>
+									<Grid size={{ xs: 12, md: 6 }}>
+										<TextField
+											label='Założony rozmiar ładunku'
+											type='number'
+											value={assumedPayloadBytes ?? ''}
+											onChange={e => setAssumedPayloadBytes(e.target.value ? Number(e.target.value) : undefined)}
+											InputProps={{ endAdornment: <InputAdornment position='end'>B</InputAdornment> }}
+											helperText='Używany gdy brak realnych danych – wpływa na bajty/s.'
+										/>
+									</Grid>
+								</>
+							)}
+							<Grid size={{ xs: 12, md: 6 }}>
+								<TextField
+									label='Czas trwania (opcjonalne)'
+									type='number'
+									value={durationSec ?? ''}
+									onChange={e => setDurationSec(e.target.value ? Number(e.target.value) : undefined)}
+									InputProps={{ endAdornment: <InputAdornment position='end'>s</InputAdornment> }}
+									helperText='Jeśli ustawione, sesja zakończy się automatycznie.'
+								/>
+							</Grid>
+						</Grid>
+
+						<Accordion disableGutters>
+							<AccordionSummary>
+								<Typography variant='body2'>Zaawansowane</Typography>
+							</AccordionSummary>
+							<AccordionDetails>
+								<Grid container spacing={2}>
+									<Grid size={{ xs: 12, md: 4 }}>
+										<TextField
+											label='Rozgrzewka – pomiń na początku'
+											type='number'
+											value={warmupSec}
+											onChange={e => setWarmupSec(Math.max(0, Number(e.target.value)))}
+											InputProps={{ endAdornment: <InputAdornment position='end'>s</InputAdornment> }}
+										/>
+									</Grid>
+									<Grid size={{ xs: 12, md: 4 }}>
+										<TextField
+											label='Wyciszenie – pomiń na końcu'
+											type='number'
+											value={cooldownSec}
+											onChange={e => setCooldownSec(Math.max(0, Number(e.target.value)))}
+											InputProps={{ endAdornment: <InputAdornment position='end'>s</InputAdornment> }}
+										/>
+									</Grid>
+									<Grid size={{ xs: 12, md: 4 }}>
+										<TextField
+											label='Liczba próbek (~1/s)'
+											type='number'
+											value={sampleCount}
+											onChange={e => setSampleCount(Number(e.target.value))}
+											helperText='Opcjonalna granica zamiast czasu trwania.'
+										/>
+									</Grid>
+								</Grid>
+							</AccordionDetails>
+						</Accordion>
+
+						{/* Podsumowanie wybranych parametrów */}
+						<Stack direction='row' spacing={1} sx={{ flexWrap: 'wrap' }}>
+							<Chip size='small' label={`Tryb: ${mode === 'ws' ? 'WS' : 'HTTP'}`} />
+							{mode === 'ws' && (
+								<Chip size='small' label={`Rate: ${wsFixedRateHz ?? 'auto'} Hz`} />
+							)}
+							{mode === 'polling' && (
+								<Chip size='small' label={`Polling: ${pollMs} ms`} />
+							)}
+							{durationSec ? <Chip size='small' label={`Czas: ${durationSec}s`} /> : null}
+							{warmupSec ? <Chip size='small' label={`Warmup: ${warmupSec}s`} /> : null}
+							{cooldownSec ? <Chip size='small' label={`Cooldown: ${cooldownSec}s`} /> : null}
+						</Stack>
+
+						<Stack direction='row' spacing={2} alignItems='center' flexWrap='wrap'>
+							<Button
+								variant='contained'
+								onClick={start}
+								disabled={loading || !!activeSession}
+								title={activeSession ? 'Najpierw zakończ bieżącą sesję' : ''}
+							>
+								Start
+							</Button>
+							{activeSession && (
+								<Button
+									color='warning'
+									variant='outlined'
+									onClick={() => stop(activeSession.id)}
+									disabled={loading}
+								>
+									Stop
+								</Button>
+							)}
+							<Button
+								color='error'
+								variant='outlined'
+								onClick={resetAll}
+								disabled={loading}
+							>
+								Resetuj sesje
+							</Button>
+							<Tooltip title='Eksportuje wszystkie sesje (w tym próbki) do pliku JSON'>
+								<span>
+									<Button
+										variant='outlined'
+										onClick={exportSessions}
+										disabled={sessions.length === 0}
+									>
+										Eksport JSON
+									</Button>
+								</span>
+							</Tooltip>
+						</Stack>
 					</Stack>
-				</Stack>
+				)}
 			</Paper>
 
 			<Paper sx={{ p: 2, mb: 3 }}>
@@ -992,7 +1259,7 @@ export default function SessionPanel() {
 						pojedynczą dostarczoną wiadomość (niższy = lepiej).
 					</li>
 					<li>
-						<strong>Bajty/s oraz Śr. bajty/payload</strong> – całkowity i
+						<strong>Bajty/s oraz śr. bajty na ładunek</strong> – całkowity i
 						jednostkowy narzut transmisji (niższy = lepiej).
 					</li>
 					<li>
@@ -1150,7 +1417,7 @@ export default function SessionPanel() {
 							/>
 							<Divider sx={{ my: 1 }} />
 							<Typography variant='body2'>
-								<strong>Śr. rozmiar payloadu:</strong> ułatwia ocenę narzutu
+								<strong>Średni rozmiar ładunku:</strong> ułatwia ocenę narzutu
 								protokołu. Wyższy rozmiar przy tej samej semantyce danych
 								wskazuje na dodatkowy overhead.
 							</Typography>

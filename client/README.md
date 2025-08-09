@@ -129,12 +129,13 @@ Create a `.env.local` in the project root (never commit secrets):
 
 ```bash
 NEXT_PUBLIC_WS_URL=ws://localhost:5000   # WebSocket base URL exposed to the browser
+NEXT_PUBLIC_API_BASE=http://localhost:5000 # Optional: HTTP base (polling, toggles, CSV export)
 ```
 
 Notes:
 
 - Must start with `NEXT_PUBLIC_` to be available client‑side.
-- If polling fallback is implemented separately, its base HTTP origin is inferred from the same host unless overridden (future extension).
+- If not provided, `NEXT_PUBLIC_API_BASE` defaults to `http://localhost:5000` in code.
 
 An example file is provided as `.env.local.example`.
 
@@ -218,6 +219,21 @@ To minimize runtime noise during measurements/tests you can disable real‑time 
 - POST `/api/monitor/live-emit` – set `{ enabled: boolean }`
 
 You can also start the server with emissions disabled via env `LIVE_EMIT_ENABLED=0` (alias: `LIVE_REALTIME_ENABLED=0`).
+
+---
+
+## Benchmarks in the Dashboard (proposal)
+
+Suggested lightweight integration points:
+
+- “Latest Benchmark” tile linking to the newest `api/benchmarks/<timestamp>/` artifacts (CSV, JSON, README).
+- “Run Measurements” button (dev‑only) that calls an API endpoint to trigger `yarn measure` server‑side and refreshes the tile once complete.
+- “Trends” tab that requests aggregated metrics (e.g., from `/api/benchmarks/trends`) and plots WS vs HTTP over time (avg rates, bytes/s, EL delay p99, jitter).
+
+Minimum client hooks to support this:
+
+- Read `NEXT_PUBLIC_API_BASE` for HTTP fetches of CSV/JSON.
+- A small helper to render CSV links and a compact metrics table.
 
 ---
 

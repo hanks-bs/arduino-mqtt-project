@@ -110,7 +110,7 @@ setInterval(async () => {
   } catch (error) {
     console.error('Błąd podczas odczytu i publikacji danych:', error);
   }
-}, 1000);
+}, 1000).unref();
 
 io.on('connection', socket => {
   console.log(`Nowy klient połączony przez WebSocket, id: ${socket.id}`);

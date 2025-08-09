@@ -97,7 +97,13 @@ LIVE_EMIT_ENABLED=1                # 0 wyłącza emisję WS (alias: LIVE_REALTIM
 
 ```env
 NEXT_PUBLIC_WS_URL=ws://localhost:5000
+NEXT_PUBLIC_API_BASE=http://localhost:5000
 ```
+
+Uwagi:
+
+- `NEXT_PUBLIC_API_BASE` (opcjonalny) definiuje bazowy adres dla zapytań HTTP (polling, przełączniki, eksport CSV). Jeśli nie podany, w kodzie klienta stosowany jest domyślny `http://localhost:5000`.
+- `NEXT_PUBLIC_WS_URL` wskazuje bazę WebSocket (Socket.IO). W środowisku docker‑compose wartości są prekonfigurowane.
 
 ### 3.3 Serial Bridge (`serial-bridge/.env`)
 
@@ -140,6 +146,41 @@ Uwaga (testy): w celu ograniczenia zniekształceń podczas pomiarów można tymc
 
 - ustawić w środowisku `LIVE_EMIT_ENABLED=0` (lub `LIVE_REALTIME_ENABLED=0`), albo
 - skorzystać z endpointu `POST /api/monitor/live-emit` z `{ "enabled": false }`.
+
+## 10. Pomiary, eksport i dokument badawczy
+
+Pomiarów dokonujemy po stronie API. Zaimplementowany jest kompletny „measurement runner”, eksport wyników oraz automatyczna aktualizacja dokumentu badawczego.
+
+- Uruchomienie pomiaru (zapisuje artefakty do `api/benchmarks/<timestamp>/`):
+   - z katalogu `api/`: `yarn measure`
+- Artefakty jednego uruchomienia:
+   - `sessions.csv` – spłaszczone próbki z sesji (WS i HTTP)
+   - `summary.json` – agregaty (średnie, p99, jitter, freshness)
+   - `README.md` – skrót wyników z mapowaniem do dashboardu
+- Aktualizacja sekcji „Wyniki ostatnich pomiarów (auto)” w `docs/ASPEKT_BADAWCZY.md`:
+   - z katalogu `api/`: `yarn docs:research:update`
+
+Wskazówki:
+
+- Na Windows (PowerShell) powyższe komendy działają tak samo jak na Linux/macOS.
+- Jeśli chcesz ograniczyć szum w trakcie pomiarów, ustaw `LIVE_EMIT_ENABLED=0` lub użyj `POST /api/monitor/live-emit` z `enabled=false`.
+
+## 11. Integracja w dashboardzie (propozycja)
+
+Minimalna integracja wyników pomiarów w UI klienta:
+
+- „Ostatni benchmark” – link/kafelek w UI wskazujący najświeższy katalog pomiaru (z odnośnikiem do `sessions.csv`, `summary.json`, `README.md`).
+- Przycisk „Uruchom pomiary” (tryb deweloperski) – wywołanie endpointu API startującego pomiar i po zakończeniu odświeżającego sekcję wyników.
+- Widok „Trendy” – wykresy z wielu uruchomień (średnia przepływność, p99 EL delay, jitter) zestawione w czasie.
+
+Aby to ułatwić, po stronie API warto dodać (opcjonalnie):
+
+- `GET /api/benchmarks/latest` – zwraca metadane i ścieżki do najnowszego pomiaru (prosty JSON).
+- `GET /api/benchmarks/trends` – agreguje `summary.json` z `api/benchmarks/**` i zwraca serię czasową wybranych metryk.
+- Serwowanie statyczne katalogu `api/benchmarks/` (do pobierania CSV/README). UI może wtedy bezpośrednio linkować do artefaktów.
+
+Implementacja tych endpointów nie jest wymagana do podstawowej pracy systemu – to propozycja rozszerzenia pod aspekt badawczy i prezentację w UI.
+
 
 ## 6. Typowe problemy i rozwiązania
 

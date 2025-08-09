@@ -170,6 +170,11 @@ export const initMqttSubscriber = (): void => {
 
         // Save as a string to latestArduinoData
         latestArduinoData = JSON.stringify(dataWithHistory);
+        try {
+          ResourceMonitor.noteArduinoPayloadSize(
+            Buffer.byteLength(latestArduinoData, 'utf8'),
+          );
+        } catch {}
 
         // Send data to WebSocket clients (if live emissions are enabled)
         if (ResourceMonitor.isLiveEmitEnabled()) {

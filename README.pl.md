@@ -106,6 +106,7 @@ LIVE_EMIT_ENABLED=1         # 0 wyłącza emisje WS (alias: LIVE_REALTIME_ENABLE
 
 ```env
 NEXT_PUBLIC_WS_URL=ws://localhost:5000
+NEXT_PUBLIC_API_BASE=http://localhost:5000
 ```
 
 ### Serial Bridge (serial-bridge/.env)
@@ -178,6 +179,42 @@ Sesje zapisują próbki i opcjonalnie uruchamiają z API deterministyczne sprawd
 
 - Wyłącz emisje w czasie rzeczywistym na czas pomiarów: `LIVE_EMIT_ENABLED=0` lub POST `/api/monitor/live-emit` z `{ enabled:false }`.
 - Porównuj WS vs HTTP polling dla identycznych parametrów sesji; eksportuj CSV i analizuj jitter, bajty/s, CPU.
+
+---
+
+## Pomiary, eksport i dokument badawczy
+
+Po stronie API dostępny jest kompletny mechanizm pomiarów, eksportu i aktualizacji dokumentacji.
+
+- Uruchom pełny zestaw pomiarowy (artefakty w `api/benchmarks/<timestamp>/`):
+  - `yarn measure` (z katalogu `api/`)
+- Artefakty jednego uruchomienia:
+  - `sessions.csv` — spłaszczone próbki sesji (WS i HTTP)
+  - `summary.json` — agregaty (średnie, p99, jitter, freshness)
+  - `README.md` — podsumowanie z mapowaniem do dashboardu
+- Zaktualizuj dokument badawczy o ostatnie wyniki (sekcja auto w `docs/ASPEKT_BADAWCZY.md`):
+  - `yarn docs:research:update` (z katalogu `api/`)
+
+Uwagi:
+
+- Aby ograniczyć szum, tymczasowo wyłącz emisje w czasie rzeczywistym: `LIVE_EMIT_ENABLED=0` lub `POST /api/monitor/live-emit` z `{ enabled:false }`.
+- Parametry i tolerancje możesz dostosować w `api/src/scripts/measurementRunner.ts`.
+
+---
+
+## Integracja w dashboardzie (propozycja)
+
+Aby wyniki pomiarów były dostępne w UI:
+
+- „Ostatni benchmark” — kafelek/link do najnowszego katalogu z `sessions.csv`, `summary.json`, `README.md`.
+- „Uruchom pomiary” (tryb deweloperski) — przycisk wywołujący endpoint API uruchamiający pomiary i odświeżający kafelek po zakończeniu.
+- „Trendy” — wykresy z wielu uruchomień (średnie wsMsgRate/httpReqRate, bytes/s, EL delay p99, jitter) w czasie.
+
+Proponowane (opcjonalne) endpointy w API:
+
+- `GET /api/benchmarks/latest` — metadane i ścieżki do najnowszego uruchomienia.
+- `GET /api/benchmarks/trends` — agregacja `summary.json` z `api/benchmarks/**` do wizualizacji trendów.
+- Serwowanie statyczne katalogu `api/benchmarks/` (pobieranie CSV/README wprost z UI).
 
 ---
 
