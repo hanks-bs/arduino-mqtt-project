@@ -222,19 +222,6 @@ You can also start the server with emissions disabled via env `LIVE_EMIT_ENABLED
 
 ---
 
-## Benchmarks in the Dashboard (proposal)
-
-Suggested lightweight integration points:
-
-- “Latest Benchmark” tile linking to the newest `api/benchmarks/<timestamp>/` artifacts (CSV, JSON, README).
-- “Run Measurements” button (dev‑only) that calls an API endpoint to trigger `yarn measure` server‑side and refreshes the tile once complete.
-- “Trends” tab that requests aggregated metrics (e.g., from `/api/benchmarks/trends`) and plots WS vs HTTP over time (avg rates, bytes/s, EL delay p99, jitter).
-
-Minimum client hooks to support this:
-
-- Read `NEXT_PUBLIC_API_BASE` for HTTP fetches of CSV/JSON.
-- A small helper to render CSV links and a compact metrics table.
-
 ---
 
 ## Available Scripts

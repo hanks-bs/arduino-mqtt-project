@@ -29,7 +29,6 @@ Lightweight TypeScript/Express backend that ingests real‑time Arduino sensor d
 17. [Troubleshooting](#troubleshooting)
 18. [License](#license)
 19. [Benchmarks & Measurement](#benchmarks--measurement)
-20. [Dashboard Integration (Proposal)](#dashboard-integration-proposal)
 
 ---
 
@@ -340,18 +339,6 @@ Notes:
 
 ---
 
-## Dashboard Integration (Proposal)
-
-Optional endpoints to surface benchmarks in the UI:
-
-- `GET /api/benchmarks/latest` — returns metadata and links to the newest run (CSV/JSON/README).
-- `GET /api/benchmarks/trends` — aggregates `summary.json` across runs to feed a trends chart (e.g., avg wsMsgRate, bytesPerSec, EL p99).
-- Serve `benchmarks/` as static files for direct download from the dashboard.
-
-Client can then render:
-
-- “Latest Benchmark” tile with quick links.
-- “Trends” tab comparing WS vs HTTP over time with confidence bands.
 
 ---
 

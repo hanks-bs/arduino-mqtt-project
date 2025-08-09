@@ -202,19 +202,6 @@ Notes:
 
 ---
 
-## Dashboard integration (proposal)
-
-To expose measurements in the UI:
-
-- “Latest Benchmark” — tile/link pointing at the newest folder with `sessions.csv`, `summary.json`, and `README.md`.
-- “Run Measurements” (dev‑only) — button calling an API endpoint to start a run and refresh the tile upon completion.
-- “Trends” — charts across multiple runs (avg wsMsgRate/httpReqRate, bytes/s, EL delay p99, jitter) over time.
-
-Optional API endpoints:
-
-- `GET /api/benchmarks/latest` — returns metadata and paths of the newest run.
-- `GET /api/benchmarks/trends` — aggregates `summary.json` across `api/benchmarks/**` for trends visualization.
-- Serve the `api/benchmarks/` directory statically (CSV/README downloadable from the UI).
 
 ---
 

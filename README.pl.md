@@ -202,19 +202,6 @@ Uwagi:
 
 ---
 
-## Integracja w dashboardzie (propozycja)
-
-Aby wyniki pomiarów były dostępne w UI:
-
-- „Ostatni benchmark” — kafelek/link do najnowszego katalogu z `sessions.csv`, `summary.json`, `README.md`.
-- „Uruchom pomiary” (tryb deweloperski) — przycisk wywołujący endpoint API uruchamiający pomiary i odświeżający kafelek po zakończeniu.
-- „Trendy” — wykresy z wielu uruchomień (średnie wsMsgRate/httpReqRate, bytes/s, EL delay p99, jitter) w czasie.
-
-Proponowane (opcjonalne) endpointy w API:
-
-- `GET /api/benchmarks/latest` — metadane i ścieżki do najnowszego uruchomienia.
-- `GET /api/benchmarks/trends` — agregacja `summary.json` z `api/benchmarks/**` do wizualizacji trendów.
-- Serwowanie statyczne katalogu `api/benchmarks/` (pobieranie CSV/README wprost z UI).
 
 ---
 

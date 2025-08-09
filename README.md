@@ -165,22 +165,6 @@ Wskazówki:
 - Na Windows (PowerShell) powyższe komendy działają tak samo jak na Linux/macOS.
 - Jeśli chcesz ograniczyć szum w trakcie pomiarów, ustaw `LIVE_EMIT_ENABLED=0` lub użyj `POST /api/monitor/live-emit` z `enabled=false`.
 
-## 11. Integracja w dashboardzie (propozycja)
-
-Minimalna integracja wyników pomiarów w UI klienta:
-
-- „Ostatni benchmark” – link/kafelek w UI wskazujący najświeższy katalog pomiaru (z odnośnikiem do `sessions.csv`, `summary.json`, `README.md`).
-- Przycisk „Uruchom pomiary” (tryb deweloperski) – wywołanie endpointu API startującego pomiar i po zakończeniu odświeżającego sekcję wyników.
-- Widok „Trendy” – wykresy z wielu uruchomień (średnia przepływność, p99 EL delay, jitter) zestawione w czasie.
-
-Aby to ułatwić, po stronie API warto dodać (opcjonalnie):
-
-- `GET /api/benchmarks/latest` – zwraca metadane i ścieżki do najnowszego pomiaru (prosty JSON).
-- `GET /api/benchmarks/trends` – agreguje `summary.json` z `api/benchmarks/**` i zwraca serię czasową wybranych metryk.
-- Serwowanie statyczne katalogu `api/benchmarks/` (do pobierania CSV/README). UI może wtedy bezpośrednio linkować do artefaktów.
-
-Implementacja tych endpointów nie jest wymagana do podstawowej pracy systemu – to propozycja rozszerzenia pod aspekt badawczy i prezentację w UI.
-
 
 ## 6. Typowe problemy i rozwiązania
 
