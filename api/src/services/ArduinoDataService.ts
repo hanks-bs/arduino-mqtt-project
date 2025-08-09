@@ -6,7 +6,6 @@ import SerialService from './SerialService';
  * (when it looks like JSON) to the configured topic with retain flag.
  */
 class ArduinoDataService {
-  private lastPublishedRaw?: string;
   /**
    * Reads the last serial line from SerialService and publishes it to MQTT with retain.
    * Placeholder/empty/non‑JSON lines are skipped to reduce broker noise.
@@ -22,13 +21,7 @@ class ArduinoDataService {
         return { data, published: false };
       }
 
-      // Deduplicate: publish only if new raw payload differs from last published
-      if (this.lastPublishedRaw === data) {
-        return { data, published: false };
-      }
-
       await MqttService.publishData(data);
-      this.lastPublishedRaw = data;
       return { data, published: true };
     } catch (error) {
       throw error;
