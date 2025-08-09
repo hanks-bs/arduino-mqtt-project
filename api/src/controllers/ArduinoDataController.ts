@@ -12,8 +12,8 @@ class ArduinoDataController {
   }
 
   /**
-  * Legacy endpoint (kept for compatibility).
-  * Prefer the wrapper in globalRoutes that counts bytes for monitoring.
+   * Legacy endpoint (kept for compatibility).
+   * Prefer the wrapper in globalRoutes that counts bytes for monitoring.
    */
   async getLatest(req: Request, res: Response, next: NextFunction) {
     try {

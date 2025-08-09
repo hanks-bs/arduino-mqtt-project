@@ -1,7 +1,7 @@
 // generalRateLimiter.ts
 
-import rateLimit from 'express-rate-limit';
 import { Request } from 'express';
+import rateLimit from 'express-rate-limit';
 
 /**
  * Strict rate limiter for sensitive routes.

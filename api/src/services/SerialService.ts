@@ -61,7 +61,7 @@ class SerialService {
       this.port.on('open', () => {
         this.open = true;
         this.reconnectAttempts = 0;
-  console.log(`[Serial] Opened port ${SERIAL_PORT} @${BAUD_RATE}`);
+        console.log(`[Serial] Opened port ${SERIAL_PORT} @${BAUD_RATE}`);
         if (this.port) {
           this.parser = this.port.pipe(new ReadlineParser({ delimiter: '\n' }));
           this.parser.on('data', (line: string) => {
@@ -95,7 +95,10 @@ class SerialService {
         this.scheduleReconnect();
       });
     } catch (e: any) {
-      console.error('[Serial] Exception during initialization:', e?.message || e);
+      console.error(
+        '[Serial] Exception during initialization:',
+        e?.message || e,
+      );
       this.scheduleReconnect();
     }
   }
@@ -130,7 +133,7 @@ class SerialService {
       if (!this.port) return resolve();
       this.port.close(err => {
         if (err) return reject(err);
-  console.log('[Serial] Port closed.');
+        console.log('[Serial] Port closed.');
         resolve();
       });
     });

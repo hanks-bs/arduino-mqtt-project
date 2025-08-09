@@ -29,7 +29,9 @@ describe('ResourceMonitorService integration', () => {
       __esModule: true,
       default: jest.fn(async () => ({ cpu: 3, memory: 150 * 1024 * 1024 })),
     }));
-    const { ResourceMonitor } = await import('../services/ResourceMonitorService');
+    const { ResourceMonitor } = await import(
+      '../services/ResourceMonitorService'
+    );
     ResourceMonitor.init(makeFakeIo());
 
     try {
@@ -63,7 +65,9 @@ describe('ResourceMonitorService integration', () => {
       __esModule: true,
       default: jest.fn(async () => ({ cpu: 4, memory: 180 * 1024 * 1024 })),
     }));
-    const { ResourceMonitor } = await import('../services/ResourceMonitorService');
+    const { ResourceMonitor } = await import(
+      '../services/ResourceMonitorService'
+    );
     ResourceMonitor.init(makeFakeIo());
     try {
       // Start a short controlled WS session
@@ -79,7 +83,7 @@ describe('ResourceMonitorService integration', () => {
       });
 
       // Wait real time to allow driver and monitor ticks to run
-      await new Promise(res => setTimeout(res, (durSec * 1000) + 600));
+      await new Promise(res => setTimeout(res, durSec * 1000 + 600));
 
       // Ensure session finished
       ResourceMonitor.finishSession(rec.id);
@@ -96,7 +100,7 @@ describe('ResourceMonitorService integration', () => {
           acc.payloadAvg += isWs ? m.wsAvgBytesPerMsg : m.httpAvgBytesPerReq;
           return acc;
         },
-        { rate: 0, bytes: 0, payloadAvg: 0 }
+        { rate: 0, bytes: 0, payloadAvg: 0 },
       );
       avg.rate /= fin!.samples.length;
       avg.bytes /= fin!.samples.length;

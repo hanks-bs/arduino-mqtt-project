@@ -13,18 +13,23 @@ export default function ChartSection({
 }: {
 	payload: ArduinoDataPayload;
 }) {
-	const { history, lastMeasurement } = payload;
+	const history = Array.isArray(payload?.history) ? payload.history : [];
+	const lastMeasurement =
+		payload?.lastMeasurement ?? history[history.length - 1];
+	if (!lastMeasurement) {
+		return null;
+	}
 
 	const tData = [...history, lastMeasurement]
 		.map(m => ({
 			x: new Date(m.timestamp),
-			y: parseFloat(m.temperature.toFixed(2)),
+			y: Math.round(m.temperature * 100) / 100,
 		}))
 		.slice(-MAX);
 	const pData = [...history, lastMeasurement]
 		.map(m => ({
 			x: new Date(m.timestamp),
-			y: parseFloat(((m.potValue / 1023) * 100).toFixed(2)),
+			y: Math.round((m.potValue / 1023) * 100 * 100) / 100,
 		}))
 		.slice(-MAX);
 
@@ -85,6 +90,7 @@ export default function ChartSection({
 			max: yMaxTemp,
 			labels: { formatter: v => `${v.toFixed(2)}°C` },
 		},
+		tooltip: { y: { formatter: (v: number) => `${v.toFixed(2)}°C` } },
 		annotations: {
 			points: [
 				{
@@ -115,6 +121,7 @@ export default function ChartSection({
 			max: 100,
 			labels: { formatter: v => `${v.toFixed(2)}%` },
 		},
+		tooltip: { y: { formatter: (v: number) => `${v.toFixed(2)}%` } },
 		markers: { size: 4, hover: { sizeOffset: 2 } },
 		annotations: {
 			points: [

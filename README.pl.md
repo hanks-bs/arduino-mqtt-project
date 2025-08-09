@@ -17,7 +17,7 @@ Architektura wspiera trzy tryby uruchomienia: pełna konteneryzacja na Linux (US
 
 Arduino → linie JSON z portu szeregowego → MQTT (retain) → subskrybent w API → WS/HTTP → UI klienta
 
-Dodatkowo API co 2 s publikuje przetworzone dane, utrzymuje ograniczoną historię w pamięci oraz wysyła metryki zasobów co sekundę.
+Dodatkowo API publikuje przetworzone dane co ~1 s, utrzymuje ograniczoną historię w pamięci oraz wysyła metryki zasobów co sekundę.
 
 Kluczowe komponenty:
 
@@ -190,7 +190,7 @@ Po stronie API dostępny jest kompletny mechanizm pomiarów, eksportu i aktualiz
   - `yarn measure` (z katalogu `api/`)
 - Artefakty jednego uruchomienia:
   - `sessions.csv` — spłaszczone próbki sesji (WS i HTTP)
-  - `summary.json` — agregaty (średnie, p99, jitter, freshness)
+  - `summary.json` — agregaty (średnie, ELU p99, jitter, freshness)
   - `README.md` — podsumowanie z mapowaniem do dashboardu
 - Zaktualizuj dokument badawczy o ostatnie wyniki (sekcja auto w `docs/ASPEKT_BADAWCZY.md`):
   - `yarn docs:research:update` (z katalogu `api/`)
@@ -201,7 +201,6 @@ Uwagi:
 - Parametry i tolerancje możesz dostosować w `api/src/scripts/measurementRunner.ts`.
 
 ---
-
 
 ---
 

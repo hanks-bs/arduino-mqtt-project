@@ -1,7 +1,7 @@
 "use client";
 
 import { FormControlLabel, Switch, Tooltip } from "@mui/material";
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useState, type ChangeEvent } from "react";
 
 /**
  * LiveEmitToggle — przełącznik włącz/wyłącz emisje WS po stronie API.
@@ -12,10 +12,11 @@ import { useEffect, useState, type ChangeEvent } from "react";
 export default function LiveEmitToggle() {
 	const [enabled, setEnabled] = useState<boolean | null>(null);
 	const [loading, setLoading] = useState(false);
+	const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5000";
 
-	const fetchStatus = async () => {
+	const fetchStatus = useCallback(async () => {
 		try {
-			const res = await fetch("http://localhost:5000/api/monitor/live-emit");
+			const res = await fetch(`${API_BASE}/api/monitor/live-emit`);
 			const json = await res.json();
 			if (json?.success && typeof json?.data?.enabled === "boolean") {
 				setEnabled(json.data.enabled);
@@ -23,11 +24,11 @@ export default function LiveEmitToggle() {
 		} catch {
 			// ignore
 		}
-	};
+	}, [API_BASE]);
 
 	useEffect(() => {
 		fetchStatus();
-	}, []);
+	}, [fetchStatus]);
 
 	const onToggle = async (
 		_evt: ChangeEvent<HTMLInputElement>,
@@ -35,7 +36,7 @@ export default function LiveEmitToggle() {
 	) => {
 		setLoading(true);
 		try {
-			const res = await fetch("http://localhost:5000/api/monitor/live-emit", {
+			const res = await fetch(`${API_BASE}/api/monitor/live-emit`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ enabled: checked }),

@@ -28,14 +28,20 @@ describe('E2E WebSocket metrics emission', () => {
   });
 
   afterAll(done => {
-    try { (server as any).close?.(); } catch {}
+    try {
+      (server as any).close?.();
+    } catch {}
     process.env = ORIGINAL_ENV;
     done();
   });
 
   it('emits metrics over WS and respects auto-enable during WS session', async () => {
     // First, connect WS client; since LIVE_REALTIME_ENABLED=0, we do not expect metrics until a WS session is started
-    const client = ioClient(baseUrl, { transports: ['websocket'], forceNew: true, reconnection: false });
+    const client = ioClient(baseUrl, {
+      transports: ['websocket'],
+      forceNew: true,
+      reconnection: false,
+    });
 
     const received: any[] = [];
     client.on('metrics', (msg: any) => received.push(msg));

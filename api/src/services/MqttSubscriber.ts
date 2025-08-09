@@ -106,7 +106,7 @@ export const initMqttSubscriber = (): void => {
       if (topic === MQTT_TOPIC) {
         const rawString = message.toString();
         const trimmed = rawString.trim();
-  // quick filter: empty, placeholder, or lacks opening brace
+        // quick filter: empty, placeholder, or lacks opening brace
         if (!trimmed || trimmed === 'Brak danych' || trimmed[0] !== '{') {
           filteredNonJson++;
           return; // ignorujemy i NIE logujemy – ograniczenie spamu
@@ -128,14 +128,14 @@ export const initMqttSubscriber = (): void => {
           return;
         }
 
-  // validate structure (type guard)
+        // validate structure (type guard)
         if (!isArduinoResponseType(parsed)) {
           invalidSchema++;
-      if (invalidSchema % 50 === 1) {
+          if (invalidSchema % 50 === 1) {
             console.error(
-        'Received invalid JSON structure (cumulative=',
+              'Received invalid JSON structure (cumulative=',
               invalidSchema,
-        '): keys=',
+              '): keys=',
               Object.keys(parsed || {}),
             );
           }

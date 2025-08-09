@@ -7,8 +7,10 @@ import {
   performance,
   type EventLoopUtilization as ELU,
 } from 'node:perf_hooks';
+import { Worker } from 'node:worker_threads';
 import pidusage from 'pidusage';
 import { Server as SocketIOServer } from 'socket.io';
+import { io as ioClient, Socket } from 'socket.io-client';
 
 /* -------------------------------------------------------------------------------------------------
  * Types
@@ -69,6 +71,14 @@ export interface SessionConfig {
   wsFixedRateHz?: number;
   /** Optional: assumed payload bytes if no observed Arduino payload yet (used by controlled WS). */
   assumedPayloadBytes?: number;
+  /** Optional: run background CPU load during the session (0..100). */
+  loadCpuPct?: number;
+  /** Optional: number of background load workers (threads). Default: 1. */
+  loadWorkers?: number;
+  /** Optional: number of synthetic HTTP polling clients (internal). */
+  clientsHttp?: number;
+  /** Optional: number of synthetic WebSocket clients (internal). */
+  clientsWs?: number;
 }
 
 export interface SessionRecord {
@@ -138,9 +148,7 @@ class ResourceMonitorService {
   private lastElu: ELU = performance.eventLoopUtilization();
   private readonly monitorTickMs: number = (() => {
     const v = Number(
-      process.env.MONITOR_TICK_MS ||
-        process.env.LIVE_MONITOR_TICK_MS ||
-        1000,
+      process.env.MONITOR_TICK_MS || process.env.LIVE_MONITOR_TICK_MS || 1000,
     );
     return Number.isFinite(v) && v >= 200 ? v : 1000;
   })();
@@ -162,13 +170,22 @@ class ResourceMonitorService {
     process.env.SELF_POLL_URL || 'http://localhost:5000/api/arduino-data';
   private readonly httpAgent = new http.Agent({ keepAlive: true });
 
+  // background CPU load workers
+  private loadWorkers: Worker[] = [];
+  // synthetic WS clients
+  private wsClientsLoad: Socket[] = [];
+  private readonly selfWsUrl =
+    process.env.SELF_WS_URL || 'http://localhost:5000';
+  // multiple HTTP pollers
+  private selfPollTimers: NodeJS.Timeout[] = [];
+
   /**
    * Must be called once after Socket.IO is ready.
    */
   init(io: SocketIOServer) {
     this.io = io;
     this.histogram.enable();
-  // Informational log only once at startup
+    // Informational log only once at startup
     try {
       console.log(
         `[ResourceMonitor] Real-time WS emissions: ${this.liveEmitEnabled ? 'ENABLED' : 'DISABLED'} (set via LIVE_REALTIME_ENABLED)`,
@@ -196,6 +213,8 @@ class ResourceMonitorService {
       } catch {}
       this.stopSelfPolling();
       this.stopWsDriver();
+      this.stopLoad();
+      this.stopWsClients();
     } catch {}
   }
 
@@ -251,7 +270,8 @@ class ResourceMonitorService {
 
   /** Inform the monitor about the last observed Arduino payload size (bytes). */
   noteArduinoPayloadSize(bytes: number) {
-    if (Number.isFinite(bytes) && bytes > 0) this.lastArduinoPayloadBytes = bytes;
+    if (Number.isFinite(bytes) && bytes > 0)
+      this.lastArduinoPayloadBytes = bytes;
   }
 
   /**
@@ -306,21 +326,37 @@ class ResourceMonitorService {
     // start internal HTTP driver if needed
     if (cfg.mode === 'polling') {
       const every = cfg.pollingIntervalMs ?? 1000;
-      this.startSelfPolling(every);
+      const clients = Math.max(1, Math.floor(cfg.clientsHttp ?? 1));
+      this.startSelfPolling(every, clients);
     } else {
       this.stopSelfPolling(); // ensure it's off
       // ensure WS emissions are enabled during a WS session
       if (this.prevLiveEmitBeforeSession === null) {
         this.prevLiveEmitBeforeSession = this.liveEmitEnabled;
       }
-  // mark if we actually force-enable (so we know whether to restore later)
-  this.forcedEmitForSession = !this.liveEmitEnabled;
-  if (this.forcedEmitForSession) this.setLiveEmitEnabled(true);
+      // mark if we actually force-enable (so we know whether to restore later)
+      this.forcedEmitForSession = !this.liveEmitEnabled;
+      if (this.forcedEmitForSession) this.setLiveEmitEnabled(true);
       // optional controlled WS driver at fixed rate
-      const hz = cfg.wsFixedRateHz && cfg.wsFixedRateHz > 0 ? cfg.wsFixedRateHz : 0;
+      const hz =
+        cfg.wsFixedRateHz && cfg.wsFixedRateHz > 0 ? cfg.wsFixedRateHz : 0;
       if (hz > 0) {
         this.startWsDriver(hz, cfg.assumedPayloadBytes);
       }
+      const wsClients = Math.max(0, Math.floor(cfg.clientsWs ?? 0));
+      if (wsClients > 0) {
+        this.startWsClients(wsClients);
+      }
+    }
+
+    // optional background CPU load
+    if (cfg.loadCpuPct && cfg.loadCpuPct > 0) {
+      const pct = Math.min(100, Math.max(1, Math.floor(cfg.loadCpuPct)));
+      const workers = Math.min(
+        8,
+        Math.max(1, Math.floor(cfg.loadWorkers ?? 1)),
+      );
+      this.startLoad(pct, workers);
     }
 
     // optional duration guard
@@ -349,6 +385,11 @@ class ResourceMonitorService {
     if (rec.config.mode === 'ws') {
       this.stopWsDriver();
     }
+    this.stopWsClients();
+    // stop background load if it was enabled for the session
+    if (rec.config.loadCpuPct && rec.config.loadCpuPct > 0) {
+      this.stopLoad();
+    }
     // restore previous WS emission flag after a WS session ends
     if (
       rec.config.mode === 'ws' &&
@@ -372,7 +413,9 @@ class ResourceMonitorService {
     this.sessions.clear();
     this.activeSessionId = null;
     this.stopSelfPolling();
-  this.stopWsDriver();
+    this.stopWsDriver();
+    this.stopLoad();
+    this.stopWsClients();
     // restore emission flag if it was overridden
     if (this.prevLiveEmitBeforeSession !== null && this.forcedEmitForSession) {
       this.setLiveEmitEnabled(this.prevLiveEmitBeforeSession);
@@ -431,7 +474,17 @@ class ResourceMonitorService {
     const now = Date.now();
     const dtSec = Math.max(0.001, (now - this.lastTickAt) / 1000);
 
-    const usage = await pidusage(process.pid);
+    // pidusage can fail on some Windows setups; fall back gracefully
+    let usageCpu = 0;
+    let usageMem = 0;
+    try {
+      const u = await pidusage(process.pid);
+      usageCpu = (u as any).cpu ?? 0;
+      usageMem = (u as any).memory ?? 0;
+    } catch {
+      const memNow = process.memoryUsage();
+      usageMem = memNow.rss; // fallback to current RSS
+    }
 
     // ELU delta
     const currentElu = performance.eventLoopUtilization(this.lastElu);
@@ -480,8 +533,8 @@ class ResourceMonitorService {
 
     return {
       ts: new Date().toISOString(),
-      cpu: usage.cpu, // %
-      rssMB: usage.memory / 1024 / 1024,
+      cpu: usageCpu, // %
+      rssMB: usageMem / 1024 / 1024,
       heapUsedMB: mem.heapUsed / 1024 / 1024,
       heapTotalMB: mem.heapTotal / 1024 / 1024,
       externalMB: mem.external / 1024 / 1024,
@@ -521,7 +574,7 @@ class ResourceMonitorService {
    * Starts internal HTTP polling driver to hit /api/arduino-data at a given interval.
    * This guarantees deterministic traffic for 'polling' sessions, independent of the UI.
    */
-  private startSelfPolling(intervalMs: number) {
+  private startSelfPolling(intervalMs: number, count: number = 1) {
     this.stopSelfPolling(); // safety
 
     const every = Math.max(50, intervalMs);
@@ -554,20 +607,25 @@ class ResourceMonitorService {
       }
     };
 
-    // kick-off immediately
-    doOnce();
-    this.selfPollTimer = setInterval(doOnce, every);
-    this.selfPollTimer.unref();
+    // create N independent pollers
+    for (let i = 0; i < Math.max(1, count); i++) {
+      doOnce();
+      const t = setInterval(doOnce, every);
+      t.unref();
+      this.selfPollTimers.push(t);
+    }
   }
 
   /**
    * Stops internal HTTP polling driver if running.
    */
   private stopSelfPolling() {
-    if (this.selfPollTimer) {
-      clearInterval(this.selfPollTimer);
-      this.selfPollTimer = null;
+    for (const t of this.selfPollTimers) {
+      try {
+        clearInterval(t);
+      } catch {}
     }
+    this.selfPollTimers = [];
   }
 
   /** Starts a controlled WS driver at fixed rate, incrementing WS counters fairly. */
@@ -575,9 +633,15 @@ class ResourceMonitorService {
     this.stopWsDriver();
     const every = Math.max(5, Math.floor(1000 / hz));
     this.isWsControlled = true;
-    const payloadBytes = Math.max(1, Math.floor(assumedBytes || this.lastArduinoPayloadBytes));
+    const payloadBytes = Math.max(
+      1,
+      Math.floor(assumedBytes || this.lastArduinoPayloadBytes),
+    );
     const doOnce = () => {
       try {
+        // Emit synthetic WS payload to exercise Socket.IO and count bytes
+        const payload = 'x'.repeat(payloadBytes);
+        if (this.liveEmitEnabled) this.io?.emit('arduinoData', payload);
         // Count WS emission with approximate payload size; keep freshness up-to-date
         this.onWsEmit(payloadBytes);
         this.setLastArduinoTimestamp(new Date().toISOString());
@@ -595,6 +659,97 @@ class ResourceMonitorService {
       this.wsDriverTimer = null;
     }
     this.isWsControlled = false;
+  }
+
+  /* --------------------------- Synthetic WS clients --------------------------- */
+
+  private startWsClients(count: number) {
+    this.stopWsClients();
+    const url = this.selfWsUrl;
+    for (let i = 0; i < Math.max(1, count); i++) {
+      try {
+        const s = ioClient(url, {
+          transports: ['websocket'],
+          reconnection: false,
+          forceNew: true,
+          timeout: 5000,
+        });
+        // minimize handlers; just hold the connection and receive events
+        s.on('connect_error', () => {});
+        s.on('connect_timeout', () => {});
+        s.on('error', () => {});
+        this.wsClientsLoad.push(s);
+      } catch {}
+    }
+  }
+
+  private stopWsClients() {
+    for (const s of this.wsClientsLoad) {
+      try {
+        s.close();
+      } catch {}
+    }
+    this.wsClientsLoad = [];
+  }
+
+  /* --------------------------- Background CPU load --------------------------- */
+
+  /** Starts background CPU load using worker_threads to avoid blocking the event loop. */
+  private startLoad(loadCpuPct: number, workers: number = 1) {
+    this.stopLoad();
+    const code = `
+      const { parentPort, workerData } = require('node:worker_threads');
+      const sab = new SharedArrayBuffer(4);
+      const arr = new Int32Array(sab);
+      let running = true;
+      parentPort.on('message', (msg) => { if (msg === 'stop') running = false; });
+      const duty = Math.min(0.99, Math.max(0, (workerData.loadPct||50)/100));
+      const sliceMs = 100;
+      function busyWait(ms) {
+        const start = Date.now();
+        // Spin with light floating point ops
+        while (Date.now() - start < ms) {
+          Math.sqrt(Math.random() * Math.random());
+        }
+      }
+      function sleep(ms) { Atomics.wait(arr, 0, 0, ms); }
+      (async function loop(){
+        try {
+          while (running) {
+            const busy = sliceMs * duty;
+            const idle = Math.max(0, sliceMs - busy);
+            if (busy > 0) busyWait(busy);
+            if (idle > 0) sleep(idle);
+          }
+        } catch {}
+        try { parentPort.postMessage('stopped'); } catch {}
+      })();
+    `;
+    for (let i = 0; i < workers; i++) {
+      try {
+        const w = new Worker(code, {
+          eval: true,
+          workerData: { loadPct: loadCpuPct },
+        });
+        // In case the worker errors, ignore but continue
+        w.on('error', () => {});
+        this.loadWorkers.push(w);
+      } catch {}
+    }
+  }
+
+  /** Stops all background load workers. */
+  private stopLoad() {
+    if (!this.loadWorkers.length) return;
+    for (const w of this.loadWorkers) {
+      try {
+        w.postMessage('stop');
+      } catch {}
+      try {
+        w.terminate();
+      } catch {}
+    }
+    this.loadWorkers = [];
   }
 
   /** Maintains a bounded rolling window of recent intervals */

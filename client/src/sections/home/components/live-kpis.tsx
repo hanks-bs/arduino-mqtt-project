@@ -24,8 +24,25 @@ function formatDelta(curr: number, prev: number | undefined, decimals = 2) {
 }
 
 export default function LiveKpis({ payload }: LiveKpisProps) {
-	const last = payload.lastMeasurement;
-	const prev = payload.history[payload.history.length - 1];
+	const { last, prev } = useMemo(() => {
+		const history = Array.isArray(payload?.history) ? payload.history : [];
+		const lastCandidate =
+			payload?.lastMeasurement ??
+			(history.length ? history[history.length - 1] : undefined);
+		const safeLast = lastCandidate ?? {
+			potValue: 0,
+			voltagePot: 0,
+			lm35Value: 0,
+			voltageLM35: 0,
+			temperature: 0,
+			readingTime: 0,
+			uptimeSec: 0,
+			readingCount: 0,
+			timestamp: new Date().toISOString(),
+		};
+		const prev = history.length >= 2 ? history[history.length - 2] : undefined;
+		return { last: safeLast, prev };
+	}, [payload]);
 
 	const potPct = useMemo(
 		() => (last ? (last.potValue / 1023) * 100 : 0),
@@ -58,7 +75,7 @@ export default function LiveKpis({ payload }: LiveKpisProps) {
 							{temp.toFixed(2)}
 						</Typography>
 						<Typography variant='caption' color='text.secondary'>
-							Δ {formatDelta(temp, prevTemp)}°C od poprzedniego
+							Δ {formatDelta(temp, prevTemp, 2)}°C od poprzedniego
 						</Typography>
 						<Box sx={{ mt: 1 }}>
 							<LinearProgress
@@ -81,9 +98,9 @@ export default function LiveKpis({ payload }: LiveKpisProps) {
 						<Typography variant='subtitle2' color='text.secondary'>
 							Potencjometr (%)
 						</Typography>
-						<Typography variant='h4'>{potPct.toFixed(1)}%</Typography>
+						<Typography variant='h4'>{potPct.toFixed(2)}%</Typography>
 						<Typography variant='caption' color='text.secondary'>
-							Δ {formatDelta(potPct, prevPotPct, 1)} pp
+							Δ {formatDelta(potPct, prevPotPct, 2)} pp
 						</Typography>
 						<Box sx={{ mt: 1 }}>
 							<LinearProgress
@@ -102,7 +119,7 @@ export default function LiveKpis({ payload }: LiveKpisProps) {
 						<Typography variant='subtitle2' color='text.secondary'>
 							Czas pracy (s)
 						</Typography>
-						<Typography variant='h4'>{last.uptimeSec}</Typography>
+						<Typography variant='h4'>{last.uptimeSec ?? 0}</Typography>
 						<Typography variant='caption' color='text.secondary'>
 							Liczba odczytów: {last.readingCount}
 						</Typography>
@@ -117,10 +134,13 @@ export default function LiveKpis({ payload }: LiveKpisProps) {
 							Znacznik czasu
 						</Typography>
 						<Typography variant='body2'>
-							{new Date(last.timestamp).toLocaleTimeString()}
+							{new Date(last.timestamp ?? Date.now()).toLocaleTimeString()}
 						</Typography>
 						<Typography variant='caption' color='text.secondary'>
-							ISO: {last.timestamp.split("T")[1]?.replace("Z", "")}
+							ISO:{" "}
+							{typeof last.timestamp === "string"
+								? last.timestamp.split("T")[1]?.replace("Z", "")
+								: "—"}
 						</Typography>
 					</CardContent>
 				</Card>

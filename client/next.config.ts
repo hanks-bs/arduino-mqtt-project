@@ -8,11 +8,6 @@ const nextConfig: NextConfig = {
 		"@mui/material": { transform: "@mui/material/{{member}}" },
 		"@mui/lab": { transform: "@mui/lab/{{member}}" },
 	},
-	turbo: {
-		rules: {
-			"*.svg": { loaders: ["@svgr/webpack"], as: "*.js" },
-		},
-	},
 };
 
 export default nextConfig;

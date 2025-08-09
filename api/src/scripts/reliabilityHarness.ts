@@ -4,7 +4,10 @@
  pushes synthetic counters, and prints aggregate summaries.
 */
 
-import { ResourceMonitor, type SessionRecord } from '../services/ResourceMonitorService';
+import {
+  ResourceMonitor,
+  type SessionRecord,
+} from '../services/ResourceMonitorService';
 
 // Minimal fake Socket.IO to satisfy init() and avoid real emissions
 const fakeIo: any = {
@@ -48,7 +51,11 @@ async function run() {
   await sleep(1000); // small gap
 
   console.log('[Harness] Starting HTTP session...');
-  const http = ResourceMonitor.startSession({ label: 'Harness HTTP', mode: 'polling', pollingIntervalMs: 1000 / samplesPerSecHttp });
+  const http = ResourceMonitor.startSession({
+    label: 'Harness HTTP',
+    mode: 'polling',
+    pollingIntervalMs: 1000 / samplesPerSecHttp,
+  });
   const httpTimer = setInterval(() => {
     // simulate HTTP response accounted by wrapper
     ResourceMonitor.onHttpResponse(httpPayloadBytes);
@@ -61,11 +68,15 @@ async function run() {
   console.log('[Harness] HTTP session finished');
 
   // Gather aggregates
-  const sessions = ResourceMonitor.listSessions().filter(s => ['Harness WS', 'Harness HTTP'].includes(s.config.label));
+  const sessions = ResourceMonitor.listSessions().filter(s =>
+    ['Harness WS', 'Harness HTTP'].includes(s.config.label),
+  );
   const agg = sessions.map(s => summarize(s));
   console.log('\n[Harness] Summary (avg over samples)');
   for (const a of agg) {
-    console.log(`- ${a.label} [${a.mode}] :: CPU% ${a.avgCpu.toFixed(1)}, RSS ${a.avgRss.toFixed(1)} MB, ELU ${a.avgElu.toFixed(2)}, p99 ${a.avgDelayP99.toFixed(1)} ms, rate ${a.avgRate.toFixed(2)}/s, B/s ${a.avgBytesRate.toFixed(0)}, jitter ${a.avgJitterMs.toFixed(1)} ms, fresh ${a.avgFreshnessMs.toFixed(0)} ms`);
+    console.log(
+      `- ${a.label} [${a.mode}] :: CPU% ${a.avgCpu.toFixed(1)}, RSS ${a.avgRss.toFixed(1)} MB, ELU ${a.avgElu.toFixed(2)}, p99 ${a.avgDelayP99.toFixed(1)} ms, rate ${a.avgRate.toFixed(2)}/s, B/s ${a.avgBytesRate.toFixed(0)}, jitter ${a.avgJitterMs.toFixed(1)} ms, fresh ${a.avgFreshnessMs.toFixed(0)} ms`,
+    );
   }
 
   process.exit(0);
@@ -91,7 +102,16 @@ function summarize(s: SessionRecord) {
       }
       return acc;
     },
-    { cpu: 0, rss: 0, elu: 0, delay: 0, rate: 0, bytes: 0, jitter: 0, fresh: 0 },
+    {
+      cpu: 0,
+      rss: 0,
+      elu: 0,
+      delay: 0,
+      rate: 0,
+      bytes: 0,
+      jitter: 0,
+      fresh: 0,
+    },
   );
   return {
     id: s.id,

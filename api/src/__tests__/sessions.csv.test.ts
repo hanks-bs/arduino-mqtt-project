@@ -19,7 +19,9 @@ describe('CSV export of sessions', () => {
   });
 
   afterAll(done => {
-    try { (server as any).close?.(); } catch {}
+    try {
+      (server as any).close?.();
+    } catch {}
     process.env = ORIGINAL_ENV;
     done();
   });

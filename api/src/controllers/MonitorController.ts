@@ -21,7 +21,7 @@ class MonitorController {
 
   /**
    * GET /api/monitor/live-emit
-  * Returns current status of the real-time emission toggle.
+   * Returns current status of the real-time emission toggle.
    */
   async liveEmitStatus(req: Request, res: Response, next: NextFunction) {
     try {
@@ -34,8 +34,8 @@ class MonitorController {
 
   /**
    * POST /api/monitor/live-emit
-  * Sets the real-time emission toggle.
-  * Body: { enabled: boolean }
+   * Sets the real-time emission toggle.
+   * Body: { enabled: boolean }
    */
   async liveEmitSet(req: Request, res: Response, next: NextFunction) {
     try {
@@ -69,11 +69,15 @@ class MonitorController {
         mode: body.mode,
         pollingIntervalMs: body.pollingIntervalMs,
         sampleCount: body.sampleCount,
-  durationSec: body.durationSec,
-  warmupSec: body.warmupSec,
-  cooldownSec: body.cooldownSec,
-  wsFixedRateHz: body.wsFixedRateHz,
-  assumedPayloadBytes: body.assumedPayloadBytes,
+        durationSec: body.durationSec,
+        warmupSec: body.warmupSec,
+        cooldownSec: body.cooldownSec,
+        wsFixedRateHz: body.wsFixedRateHz,
+        assumedPayloadBytes: body.assumedPayloadBytes,
+        loadCpuPct: body.loadCpuPct,
+        loadWorkers: body.loadWorkers,
+        clientsHttp: body.clientsHttp,
+        clientsWs: body.clientsWs,
       };
       const rec = ResourceMonitor.startSession(cfg);
       return res.status(201).json({ success: true, data: rec });

@@ -47,17 +47,7 @@ Use cases:
 
 ## Preview
 
-| Dashboard (placeholder)        | Connection Indicator          | Mode Controls                 |
-| ------------------------------ | ----------------------------- | ----------------------------- |
-| ![Logo](public/logo-wieik.svg) | Status pill (green/amber/red) | WebSocket vs Polling selector |
-
-> Replace placeholders with real screenshots for better visual context.
-
-Suggested screenshot files (place under `screenshots/`):
-
-- `dashboard-overview.png`
-- `connection-status.png`
-- `session-comparison.png`
+Krótki podgląd działania aplikacji i kluczowych elementów interfejsu (wskaźnik połączenia, wybór trybu pracy, wykresy i panele KPI).
 
 ## Features
 
@@ -78,12 +68,12 @@ Suggested screenshot files (place under `screenshots/`):
 
 ```mermaid
 flowchart LR
-  A[Arduino Board\n(Potentiometer & Temp Sensor)] --> B[Express/TypeScript API]
-  B -->|WebSocket stream| C[Client WebSocket Provider]
-  B -->|HTTP (fallback)| C
-  C --> D[State / Context]
-  D --> E[Charts & Panels]
-  B --> F[Server Resource Endpoint]
+  A["Arduino Board<br/>(Potentiometer & Temp Sensor)"] --> B["Express/TypeScript API"]
+  B -->|"WebSocket stream"| C["Client WebSocket Provider"]
+  B -. "HTTP fallback" .-> C
+  C --> D["State / Context"]
+  D --> E["Charts & Panels"]
+  B --> F["Server Resource Endpoint"]
   F --> C
 ```
 
@@ -157,7 +147,7 @@ yarn dev
 http://localhost:3000
 ```
 
-Hot reloading & fast refresh are enabled. Ensure the external NestJS API + WebSocket server is running (default assumed at `localhost:5000`).
+Hot reloading & fast refresh are enabled. Ensure the external Express API + WebSocket server is running (default assumed at `localhost:5000`).
 
 ---
 
@@ -250,7 +240,6 @@ yarn start
 - WebSocket payloads typed to avoid runtime shape errors.
 - ApexCharts configuration tuned for live streaming (animations & smooth transitions).
 - Single source of truth for telemetry via context provider avoids prop drilling.
- 
 
 ---
 
@@ -288,5 +277,3 @@ docker compose up --build
 ```
 
 ---
-
-Made with ❤️ for real‑time IoT telemetry.

@@ -14,7 +14,7 @@ Kluczowe pytania i hipotezy:
 - P1: WS daje mniejszą latencję świeżości danych (freshness) niż HTTP dla porównywalnych częstotliwości (1–2 Hz).
 - P2: Zależność bytesRate ≈ rate × payload powinna być spełniona dla obu metod (przy stałym ładunku).
 - P3: Stabilność interwałów (jitter) jest lepsza przy kontrolowanym źródle (WS driver) niż przy tykaniu UI.
-- P4: Narzut CPU/RSS i opóźnienia pętli zdarzeń (EL p99) pozostają akceptowalne przy 1–2 Hz.
+- P4: Narzut CPU/RSS i opóźnienia pętli zdarzeń (ELU p99) pozostają akceptowalne przy 1–2 Hz.
 
 ## 2. Metryki i definicje
 
@@ -25,7 +25,7 @@ Mierzone metryki (wyliczane co ok. 1 s):
 - ~Payload [B]: wsAvgBytesPerMsg lub httpAvgBytesPerReq.
 - Jitter [ms]: odchylenie standardowe odstępów między wiadomościami/odpowiedziami.
 - Freshness [ms]: czas od ostatniego odczytu danych (niższy = świeższe).
-- EL p99 [ms]: 99. percentyl opóźnienia pętli zdarzeń Node.
+- ELU p99 [ms]: 99. percentyl opóźnienia pętli zdarzeń Node (metryka skorelowana z ELU).
 - CPU [%], RSS [MB]: zużycie procesora i pamięci procesu.
 
 Źródło metryk: `api/src/services/ResourceMonitorService.ts`.
@@ -37,6 +37,7 @@ Mierzone metryki (wyliczane co ok. 1 s):
 - Sterownik WS (tryb kontrolowany): stała częstotliwość (wsFixedRateHz) oraz założony rozmiar ładunku.
 - HTTP (symulacja): wewnętrzny licznik odpowiedzi (onHttpResponse) z określonym rozmiarem ładunku.
 - Emisje na żywo podczas pomiarów: wyłączone (izolacja wyników), włączane automatycznie dla sesji WS.
+- Opcjonalne obciążenie CPU na czas sesji: generator w wątkach roboczych (worker_threads), sterowany polami `loadCpuPct` (0..100) i `loadWorkers` (1..8).
 
 ## 4. Procedura eksperymentalna
 
@@ -61,7 +62,7 @@ Mierzone metryki (wyliczane co ok. 1 s):
 - ~Payload [B] → wykres średniego rozmiaru ładunku.
 - Jitter → stabilność interwałów (mniejsze = lepiej).
 - Freshness → świeżość danych (mniejsze = szybciej dostarczone).
-- EL p99 → opóźnienia pętli zdarzeń (niższe = lepiej).
+- ELU p99 → opóźnienia pętli zdarzeń (niższe = lepiej).
 - CPU/RSS → panel zasobów procesu.
 
 ## 7. Testy i walidacja poprawności
@@ -105,21 +106,68 @@ Zawiera po dwa testy dla każdej metody (WS i HTTP) oraz krótkie wnioski.
 
 <!-- AUTO-RESULTS:BEGIN -->
 
-Ostatni run: 2025-08-09T13-53-06-784Z
+Ostatni run: 2025-08-09T20-22-02-287Z
 
-Pliki: [sessions.csv](../api/benchmarks/2025-08-09T13-53-06-784Z/sessions.csv), [summary.json](../api/benchmarks/2025-08-09T13-53-06-784Z/summary.json), [README](../api/benchmarks/2025-08-09T13-53-06-784Z/README.md)
+Pliki: [sessions.csv](../api/benchmarks/2025-08-09T20-22-02-287Z/sessions.csv), [summary.json](../api/benchmarks/2025-08-09T20-22-02-287Z/summary.json), [README](../api/benchmarks/2025-08-09T20-22-02-287Z/README.md)
 
-| Label | Mode | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | Świeżość [ms] | EL p99 [ms] | Rate OK | Payload OK |
+| Label | Mode | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | Świeżość [ms] | ELU p99 [ms] | Rate OK | Payload OK |
 |---|---:|---:|---:|---:|---:|---:|---:|:--:|:--:|
-| WS@1Hz payload=360B | ws | 0.70 | 253 | 270 | 17.2 | 614 | 48.9 | ✅ | ✅ |
-| WS@2Hz payload=360B | ws | 0.91 | 327 | 360 | 444.9 | 413 | 49.4 | ❌ | ✅ |
-| HTTP@1Hz payload=420B | polling | 0.41 | 174 | 350 | 0.3 | 719 | 50.0 | ❌ | ✅ |
-| HTTP@2Hz payload=420B | polling | 0.83 | 347 | 350 | 280.2 | 426 | 48.8 | ❌ | ✅ |
+| WS@1Hz payload=360B | ws | 0.99 | 357 | 180 | 17.8 | 718 | 49.1 | ✅ | ✅ |
+| WS@2Hz payload=360B | ws | 0.82 | 297 | 360 | 533.7 | 431 | 47.1 | ❌ | ✅ |
+| HTTP@1Hz payload=420B | polling | 0.37 | 156 | 315 | 0.2 | 704 | 46.0 | ❌ | ✅ |
+| HTTP@2Hz payload=420B | polling | 0.74 | 312 | 315 | 293.6 | 564 | 46.1 | ❌ | ✅ |
 
 Wnioski:
-- WS@1Hz payload=360B: rate=0.70 in [0.50, 1.50]; bytesPerUnit=360.0 in [180.0, 540.0]
-- WS@2Hz payload=360B: rate=0.91 in [1.00, 3.00]; bytesPerUnit=360.0 in [180.0, 540.0]
-- HTTP@1Hz payload=420B: rate=0.41 in [0.50, 1.50]; bytesPerUnit=420.0 in [210.0, 630.0]
-- HTTP@2Hz payload=420B: rate=0.83 in [1.00, 3.00]; bytesPerUnit=420.0 in [210.0, 630.0]
+- WS@1Hz payload=360B: rate=0.99 in [0.50, 1.50]; bytesPerUnit=360.0 in [180.0, 540.0]
+- WS@2Hz payload=360B: rate=0.82 in [1.00, 3.00]; bytesPerUnit=360.0 in [180.0, 540.0]
+- HTTP@1Hz payload=420B: rate=0.37 in [0.50, 1.50]; bytesPerUnit=420.0 in [210.0, 630.0]
+- HTTP@2Hz payload=420B: rate=0.74 in [1.00, 3.00]; bytesPerUnit=420.0 in [210.0, 630.0]
+
+
+Parametry przyjęte w ostatnim runie:
+- Metody: ws, polling
+- Częstotliwości [Hz]: 1, 2
+- Obciążenia CPU [%]: 0
+- Czas sesji [s]: 4
+- MONITOR_TICK_MS: 200
+- Payloady: WS=360B, HTTP=420B
+- Klienci: clientsHttp=0, clientsWs=0
+
+
+
+
+## Zestawienie wg obciążenia (agregaty)
+
+### Porównanie wg obciążenia — WebSocket
+
+| Obciążenie | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0% | 0.91 | 327 | 270 | 275.7 | 48.1 | 0.6 | 206.1 |
+### Porównanie wg obciążenia — HTTP polling
+
+| Obciążenie | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0% | 0.56 | 234 | 315 | 146.9 | 46.1 | 7.0 | 198.9 |
+
 
 <!-- AUTO-RESULTS:END -->
+
+## 13. Status pokrycia scenariuszy (S1–S6)
+
+Mapowanie do sekcji „8.2 Scenariusze eksperymentalne” z architectural-overview:
+
+- S1 (WS – 1 klient): realizowane przez measurementRunner (WS@1Hz/2Hz) – Pokryte.
+- S2 (WS – N klientów): obecnie brak wielokrotnego klienta w runnerze; wymaga skryptu z sekcji 12.1 – Częściowo (Do zrobienia).
+- S3 (Polling – 1 klient): realizowane przez measurementRunner (HTTP@1Hz/2Hz) – Pokryte.
+- S4 (Polling – N klientów): wymaga równoległych instancji skryptu 12.2 lub rozszerzenia runnera – Częściowo (Do zrobienia).
+- S5 (Polling 250 ms): runner wspiera zmianę interwału, ale domyślnie nie uruchamia 250 ms; do uruchomienia parametrycznie – Możliwe (Wymaga flag).
+- S6 (Mix WS/Polling): brak mieszanej generacji obciążenia w jednym przebiegu – Do zrobienia.
+
+Wniosek: obecny proces testów i pomiarów pokrywa przypadki S1 i S3 (pojedynczy klient WS/HTTP dla 1–2 Hz). Scenariusze wieloklientowe oraz high-frequency wymagają krótkiego rozszerzenia runnera lub użycia dołączonych skryptów obciążeniowych (sekcja 12).
+
+---
+
+Uwagi metodologiczne dot. prezentacji wyników:
+
+- Wszystkie wartości prezentowane na dashboardzie i w tabelach są formatowane do dwóch miejsc po przecinku dla spójności wizualnej. Nie implikuje to rzeczywistej rozdzielczości pomiaru.
+- Tam, gdzie to istotne, jednostki są pokazywane wprost (ms, B, B/s, %). Dla dużych liczb stosowane są separatory tysięcy zgodne z lokalizacją (PL).

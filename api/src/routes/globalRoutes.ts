@@ -1,6 +1,9 @@
 // src/routes/globalRoutes.ts
 import ArduinoDataController from 'App/controllers/ArduinoDataController';
-import { ResourceMonitor, ResourceMonitor as RM } from 'App/services/ResourceMonitorService';
+import {
+  ResourceMonitor,
+  ResourceMonitor as RM,
+} from 'App/services/ResourceMonitorService';
 import { NextFunction, Request, Response, Router } from 'express';
 // --------------------------------------------------------------
 

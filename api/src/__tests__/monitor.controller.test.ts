@@ -5,7 +5,7 @@ jest.mock('../services/ResourceMonitorService', () => {
   return {
     __esModule: true,
     ResourceMonitor: {
-  init: jest.fn(),
+      init: jest.fn(),
       sampleNow: jest.fn(async () => ({ ok: true })),
       isLiveEmitEnabled: jest.fn(() => true),
       setLiveEmitEnabled: jest.fn(),
@@ -24,7 +24,9 @@ import server from '../server';
 describe('MonitorController routes', () => {
   afterAll(done => {
     // Close underlying HTTP server to avoid open handles in Jest
-    try { (server as any).close?.(); } catch {}
+    try {
+      (server as any).close?.();
+    } catch {}
     done();
   });
 
@@ -46,7 +48,9 @@ describe('MonitorController routes', () => {
     const bad = await request(server).post('/api/monitor/live-emit').send({});
     expect(bad.status).toBe(400);
 
-    const ok = await request(server).post('/api/monitor/live-emit').send({ enabled: false });
+    const ok = await request(server)
+      .post('/api/monitor/live-emit')
+      .send({ enabled: false });
     expect(ok.status).toBe(200);
     expect(ok.body.success).toBe(true);
   });
@@ -55,7 +59,9 @@ describe('MonitorController routes', () => {
     const bad = await request(server).post('/api/monitor/start').send({});
     expect(bad.status).toBe(400);
 
-    const ok = await request(server).post('/api/monitor/start').send({ label: 'x', mode: 'ws' });
+    const ok = await request(server)
+      .post('/api/monitor/start')
+      .send({ label: 'x', mode: 'ws' });
     expect(ok.status).toBe(201);
     expect(ok.body.data.id).toBe('1');
   });
@@ -64,10 +70,14 @@ describe('MonitorController routes', () => {
     const bad = await request(server).post('/api/monitor/stop').send({});
     expect(bad.status).toBe(400);
 
-    const nf = await request(server).post('/api/monitor/stop').send({ id: 'nope' });
+    const nf = await request(server)
+      .post('/api/monitor/stop')
+      .send({ id: 'nope' });
     expect(nf.status).toBe(404);
 
-    const ok = await request(server).post('/api/monitor/stop').send({ id: '1' });
+    const ok = await request(server)
+      .post('/api/monitor/stop')
+      .send({ id: '1' });
     expect(ok.status).toBe(200);
   });
 

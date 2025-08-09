@@ -17,7 +17,7 @@ Data path:
 
 Arduino → Serial JSON lines → MQTT retain topic → API subscriber → WS/HTTP → Client UI
 
-Additionally, API publishes processed data every 2s, maintains an in‑memory bounded history, and emits per‑second resource metrics.
+Additionally, the API publishes processed data roughly every 1 s, maintains an in‑memory bounded history, and emits per‑second resource metrics.
 
 Key components:
 
@@ -190,7 +190,7 @@ The API provides a complete measurement pipeline, export, and auto‑update of t
   - `yarn measure` (from `api/`)
 - Artifacts per run:
   - `sessions.csv` — flattened per‑second samples for WS and HTTP
-  - `summary.json` — aggregates (averages, p99, jitter, freshness)
+  - `summary.json` — aggregates (averages, ELU p99, jitter, freshness)
   - `README.md` — human‑readable summary mapped to the dashboard
 - Update the research document with the latest results (auto section in `docs/ASPEKT_BADAWCZY.md`):
   - `yarn docs:research:update` (from `api/`)
@@ -201,7 +201,6 @@ Notes:
 - You can tune parameters and tolerances in `api/src/scripts/measurementRunner.ts`.
 
 ---
-
 
 ---
 

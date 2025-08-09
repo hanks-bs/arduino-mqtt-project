@@ -7,7 +7,7 @@ import morgan from 'morgan';
 import { Server as SocketIOServer } from 'socket.io';
 import errorHandler from './middlewares/errorHandler';
 import handleCorsError from './middlewares/handleCorsError';
-import { initWebSockets } from './providers';
+import { closeWebSockets, initWebSockets } from './providers';
 import { generalLimiter } from './rateLimiters/generalRateLimiter';
 import globalRoutes from './routes/globalRoutes';
 import monitorRoutes from './routes/monitorRoutes';
@@ -96,6 +96,13 @@ const server = http.createServer(app);
 
 // Initialize Socket.IO in the HTTP server
 const io: SocketIOServer = initWebSockets(server);
+
+// Ensure Socket.IO is closed when HTTP server closes (tests/shutdown)
+server.on('close', () => {
+  try {
+    closeWebSockets();
+  } catch {}
+});
 
 // Initialize MQTT subscription - save the latest data globally
 initMqttSubscriber();

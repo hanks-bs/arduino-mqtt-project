@@ -63,13 +63,13 @@ The service continuously reads raw JSON telemetry lines from an Arduino via a co
 
 ## Preview
 
-| Component | Description | Example (placeholder) |
-| --- | --- | --- |
-| WebSocket Stream | Emits `arduinoData` & `metrics` events | ws://localhost:5000 |
-| HTTP Endpoint | Poll `/api/arduino-data` for last JSON | curl example |
-| Session Recording | Start via `/api/monitor/start` | `{ "label":"Test", "mode":"ws" }` |
+Szybkie sprawdzenie działania:
 
-> Replace placeholders with real screenshots / curl samples.
+- WebSocket: subskrybuj eventy `arduinoData` i `metrics` przez Socket.IO (domyślnie pod `ws://localhost:5000`).
+- HTTP: wywołaj `/api/arduino-data` aby pobrać ostatni zestaw danych (JSON).
+- Sesje: rozpocznij `POST /api/monitor/start` z `{ "label":"Test", "mode":"ws" }`.
+
+Przykłady można uruchomić lokalnie (curl/WS) albo przez testy integracyjne.
 
 ## High-Level Architecture
 
@@ -95,7 +95,7 @@ flowchart LR
 
 1. Arduino emits a line (newline terminated) JSON (includes potentiometer, temperature etc.).
 2. `SerialService` captures and stores the latest raw line.
-3. Every 2s `ArduinoDataService.process()` fetches the latest line and publishes via MQTT (retain).
+3. Every ~1 s `ArduinoDataService.process()` fetches the latest line and publishes via MQTT (retain).
 4. Separate `MqttSubscriber` (also subscribed to the retained topic) validates, enriches (timestamp), appends to history (capped to 1000, history excludes the current point), and emits via Socket.IO (`arduinoData`) when live emissions are enabled.
 5. HTTP clients can poll `/api/arduino-data` for the latest composite object.
 6. `ResourceMonitorService` samples CPU/memory/event loop & traffic counters each second, streaming metrics via `metrics` WebSocket event and optionally recording into sessions (ws or polling modes).
@@ -179,6 +179,7 @@ src/
   "history": [ { "potValue": 120, "temperature": 21.4, "timestamp": "..." } ]
 }
 ```
+
 Semantics:
 
 - `history` intentionally does NOT include the current `lastMeasurement` point. This keeps delta/derivative views on the client meaningful and avoids double‑counting.
@@ -203,7 +204,7 @@ Arduino payload shape (per line before enrichment):
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/api/monitor/live` | One immediate resource metrics sample |
-| POST | `/api/monitor/start` | Start a measurement session (body: `{ label, mode, pollingIntervalMs?, sampleCount?, durationSec? }`) |
+| POST | `/api/monitor/start` | Start a measurement session (body: `{ label, mode, pollingIntervalMs?, sampleCount?, durationSec?, wsFixedRateHz?, assumedPayloadBytes?, loadCpuPct?, loadWorkers?, clientsHttp?, clientsWs? }`) |
 | POST | `/api/monitor/stop` | Stop an active session (body: `{ id }`) |
 | POST | `/api/monitor/reset` | Clear all recorded sessions |
 | GET | `/api/monitor/sessions` | List sessions (latest first) |
@@ -336,9 +337,14 @@ Notes:
 
 - To reduce noise during measurements, temporarily disable live emissions with `LIVE_EMIT_ENABLED=0` or via `POST /api/monitor/live-emit`.
 - Intervals and tolerances are configurable in the measurement script (`src/scripts/measurementRunner.ts`).
+- Opcjonalny generator obciążenia CPU na czas sesji: `loadCpuPct` (0..100) i `loadWorkers` (1..8). W runnerze można też użyć env `MEASURE_LOAD_PCT`, `MEASURE_LOAD_WORKERS`.
+- Symulacja liczby klientów w sesji: `clientsHttp` (N równoległych wewnętrznych pollerów) oraz `clientsWs` (N syntetycznych klientów Socket.IO podłączonych do własnego serwera). Uwaga: `clientsWs` wymaga aby API było uruchomione i wystawiało Socket.IO pod `SELF_WS_URL` (domyślnie <http://localhost:5000>).
+- W measurementRunner dostępne są dodatkowe flagi środowiskowe:
+  - `MEASURE_LOAD_SET` np. `0,25,50` — uruchamia komplet przebiegów dla wielu poziomów obciążenia CPU,
+  - `MEASURE_CLIENTS_HTTP` — liczba syntetycznych klientów HTTP,
+  - `MEASURE_CLIENTS_WS` — liczba syntetycznych klientów WS.
 
 ---
-
 
 ---
 
@@ -376,7 +382,6 @@ Issues & PRs welcome. Please run `yarn format` before submitting.
 
 ### Quick Reference
 
- 
 ```bash
 # Dev
 yarn dev

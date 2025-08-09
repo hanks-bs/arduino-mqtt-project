@@ -48,6 +48,14 @@ export interface SessionConfig {
 	wsFixedRateHz?: number;
 	/** Założony rozmiar payloadu w bajtach (gdy brak realnego) */
 	assumedPayloadBytes?: number;
+	/** Opcjonalne: procentowe obciążenie CPU w trakcie sesji (0..100) */
+	loadCpuPct?: number;
+	/** Opcjonalne: liczba wątków obciążenia CPU */
+	loadWorkers?: number;
+	/** Opcjonalne: liczba syntetycznych klientów HTTP (wewnętrznych) */
+	clientsHttp?: number;
+	/** Opcjonalne: liczba syntetycznych klientów WebSocket (wewnętrznych) */
+	clientsWs?: number;
 }
 
 export interface SessionRecord {

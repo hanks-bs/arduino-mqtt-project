@@ -2,7 +2,7 @@
 import { ResourceMonitor } from 'App/services/ResourceMonitorService';
 import { Server as SocketIOServer } from 'socket.io';
 
-let ioRef: SocketIOServer;
+let ioRef: SocketIOServer | undefined;
 
 /**
  * Initializes a singleton Socket.IO server and wires ResourceMonitor to it.
@@ -25,4 +25,12 @@ export const initWebSockets = (
 };
 
 /** Returns the initialized Socket.IO instance. */
-export const getWebSockets = () => ioRef;
+export const getWebSockets = () => ioRef!;
+
+/** Closes the Socket.IO server if initialized (used in tests/shutdown). */
+export const closeWebSockets = () => {
+  try {
+    ioRef?.close();
+  } catch {}
+  ioRef = undefined;
+};

@@ -5,8 +5,8 @@ import {
 	useSocketIOEvent,
 	useSocketIOStatus,
 } from "@/websocket/providers/websocket-provider";
+import { Paper, Skeleton } from "@mui/material";
 import Stack from "@mui/material/Stack";
-import { Skeleton, Paper } from "@mui/material";
 import { useEffect, useRef, useState } from "react";
 import ChartSection from "../charts-section";
 import ConnectionStatus from "../components/connection-status";
@@ -59,7 +59,8 @@ export function HomeView() {
 			pollingRef.current = null;
 		}
 		if (mode === "polling" && auto) {
-			const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5000";
+			const API_BASE =
+				process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5000";
 			const fetchData = async () => {
 				try {
 					const res = await fetch(`${API_BASE}/api/arduino-data`);
@@ -84,7 +85,8 @@ export function HomeView() {
 
 	// ręczne odświeżenie w trybie manualnym
 	const manualRefresh = async () => {
-		const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5000";
+		const API_BASE =
+			process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5000";
 		try {
 			const res = await fetch(`${API_BASE}/api/arduino-data`);
 			const json = await res.json();
@@ -118,9 +120,13 @@ export function HomeView() {
 					onManualRefresh={manualRefresh}
 				/>
 			)}
-			{payload && <LiveKpis payload={payload} />}
-			{payload && <CurrentResults last={payload.lastMeasurement} />}
-			{payload ? (
+			{payload?.lastMeasurement && Array.isArray(payload.history) && (
+				<LiveKpis payload={payload} />
+			)}
+			{payload?.lastMeasurement && (
+				<CurrentResults last={payload.lastMeasurement} />
+			)}
+			{payload?.lastMeasurement && Array.isArray(payload.history) ? (
 				<ChartSection payload={payload} />
 			) : (
 				<Stack spacing={2}>

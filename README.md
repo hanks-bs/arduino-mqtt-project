@@ -11,6 +11,8 @@ Monorepo zawiera trzy główne elementy:
 | `mosquitto/`     | Konfiguracja brokera MQTT (Eclipse Mosquitto)                                  |
 | `serial-bridge/` | (Windows) Mostek COM -> MQTT, gdy kontener nie ma dostępu do portu szeregowego |
 
+Szczegółowe diagramy architektury i przepływu: zobacz `docs/architectural-overview.md`.
+
 ## 1. Wymagania wstępne
 
 | Narzędzie                                         | Wersja (min)              |
@@ -120,7 +122,7 @@ Arduino → (linia JSON) → Serial (COM lub /dev/tty\*) → [Mostek (Windows) l
 
 API dodatkowo:
 
-- publikuje dane co 2s
+- publikuje dane co 1 s
 - agreguje historię w pamięci
 - monitoruje zasoby i emituje metryki
 
@@ -152,19 +154,18 @@ Uwaga (testy): w celu ograniczenia zniekształceń podczas pomiarów można tymc
 Pomiarów dokonujemy po stronie API. Zaimplementowany jest kompletny „measurement runner”, eksport wyników oraz automatyczna aktualizacja dokumentu badawczego.
 
 - Uruchomienie pomiaru (zapisuje artefakty do `api/benchmarks/<timestamp>/`):
-   - z katalogu `api/`: `yarn measure`
+  - z katalogu `api/`: `yarn measure`
 - Artefakty jednego uruchomienia:
-   - `sessions.csv` – spłaszczone próbki z sesji (WS i HTTP)
-   - `summary.json` – agregaty (średnie, p99, jitter, freshness)
-   - `README.md` – skrót wyników z mapowaniem do dashboardu
+  - `sessions.csv` – spłaszczone próbki z sesji (WS i HTTP)
+  - `summary.json` – agregaty (średnie, ELU p99, jitter, freshness)
+  - `README.md` – skrót wyników z mapowaniem do dashboardu
 - Aktualizacja sekcji „Wyniki ostatnich pomiarów (auto)” w `docs/ASPEKT_BADAWCZY.md`:
-   - z katalogu `api/`: `yarn docs:research:update`
+  - z katalogu `api/`: `yarn docs:research:update`
 
 Wskazówki:
 
 - Na Windows (PowerShell) powyższe komendy działają tak samo jak na Linux/macOS.
 - Jeśli chcesz ograniczyć szum w trakcie pomiarów, ustaw `LIVE_EMIT_ENABLED=0` lub użyj `POST /api/monitor/live-emit` z `enabled=false`.
-
 
 ## 6. Typowe problemy i rozwiązania
 
