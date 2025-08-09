@@ -1,0 +1,5 @@
+# Normalize line endings to LF in repo, let git handle platform conversions
+* text=auto eol=lf
+
+# Treat docs as documentation for GitHub linguist
+docs/** linguist-documentation

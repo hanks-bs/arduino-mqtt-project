@@ -1,0 +1,104 @@
+# Unified stack: API + Next.js client + Mosquitto broker
+# Run: docker compose up --build
+# Stop: docker compose down -v
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001" # websocket listener (if enabled in config)
+    volumes:
+      - ./mosquitto/config:/mosquitto/config:ro
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    healthcheck:
+      # $$ escapes $ for compose variable interpolation so the broker sees literal $SYS
+      test:
+        [
+          "CMD",
+          "mosquitto_sub",
+          "-h",
+          "localhost",
+          "-t",
+          "$$SYS/broker/version",
+          "-C",
+          "1",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - telemetry-net
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: arduino-api:local
+    container_name: arduino-api
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      PORT: 5000
+      NODE_ENV: production
+      # On Windows (Docker Desktop) dostęp do fizycznego portu szeregowego jest utrudniony – wyłączamy
+      SERIAL_PORT: disabled
+      BAUD_RATE: 9600
+      MQTT_BROKER: mqtt://mosquitto:1883
+      MQTT_TOPIC: arduino/sensordata
+      SELF_POLL_URL: http://arduino-api:5000/api/arduino-data
+    ports:
+      - "5000:5000"
+    # Uncomment to forward a physical serial device (Linux)
+    # Linux: aby włączyć fizyczne urządzenie odkomentuj poniższe (i ustaw SERIAL_PORT=/dev/ttyUSB0)
+    # devices:
+    #   - "/dev/ttyUSB0:/dev/ttyUSB0"
+    # If permissions issue occurs, you can temporarily run as root (uncomment):
+    # user: root
+    # Or add dialout group (may not match host gid):
+    # group_add:
+    #   - dialout
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - telemetry-net
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    image: arduino-client:local
+    container_name: arduino-client
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      # Uwaga: musi być adres dostępny z przeglądarki użytkownika, nie nazwa kontenera
+      NEXT_PUBLIC_WS_URL: ws://localhost:5000
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - telemetry-net
+
+networks:
+  telemetry-net:
+    driver: bridge

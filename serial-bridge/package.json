@@ -1,0 +1,16 @@
+{
+	"name": "serial-mqtt-bridge",
+	"version": "1.0.0",
+	"private": true,
+	"description": "Mostek Windows COM -> MQTT broker używany przez kontener API",
+	"license": "UNLICENSED",
+	"scripts": {
+		"start": "node serial-bridge.js",
+		"dev": "node serial-bridge.js"
+	},
+	"dependencies": {
+		"mqtt": "^5.10.3",
+		"serialport": "^13.0.0",
+		"dotenv": "^16.4.5"
+	}
+}
