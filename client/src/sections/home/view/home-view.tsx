@@ -6,6 +6,7 @@ import {
 	useSocketIOStatus,
 } from "@/websocket/providers/websocket-provider";
 import Stack from "@mui/material/Stack";
+import { Skeleton, Paper } from "@mui/material";
 import { useEffect, useRef, useState } from "react";
 import ChartSection from "../charts-section";
 import ConnectionStatus from "../components/connection-status";
@@ -122,7 +123,16 @@ export function HomeView() {
 			{payload ? (
 				<ChartSection payload={payload} />
 			) : (
-				<p>Oczekiwanie na dane…</p>
+				<Stack spacing={2}>
+					<Paper sx={{ p: 2 }}>
+						<Skeleton variant='text' width={180} height={28} />
+						<Skeleton variant='rectangular' height={220} />
+					</Paper>
+					<Paper sx={{ p: 2 }}>
+						<Skeleton variant='text' width={220} height={28} />
+						<Skeleton variant='rectangular' height={220} />
+					</Paper>
+				</Stack>
 			)}
 			{payload && <ResourceMonitor />}
 			<SessionPanel />

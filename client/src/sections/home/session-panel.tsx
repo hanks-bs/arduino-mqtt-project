@@ -23,6 +23,7 @@ import {
 	Typography,
 } from "@mui/material";
 import type { ApexOptions } from "apexcharts";
+import { useTheme } from "@mui/material/styles";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -106,6 +107,7 @@ function overlap(a: SessionRecord, b: SessionRecord): boolean {
  * ------------------------------------------------------------------------------------------------- */
 
 export default function SessionPanel() {
+	const theme = useTheme();
 	// Sessions state
 	const [sessions, setSessions] = useState<SessionRecord[]>([]);
 	const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -370,7 +372,7 @@ export default function SessionPanel() {
 		return { item: aggregates[bestIdx], score: bestScore };
 	}, [aggregates]);
 
-	function colorFor(value: number, kind: "p99" | "elu" | "jitter" | "fresh", theme: any) {
+	function colorFor(value: number, kind: "p99" | "elu" | "jitter" | "fresh") {
 		if (kind === "p99") {
 			if (value < thresholds.p99MsGood) return theme.palette.success.main;
 			if (value < thresholds.p99MsWarn) return theme.palette.warning.main;
@@ -418,6 +420,14 @@ export default function SessionPanel() {
 			data: toIndexSeries(s.samples, m => m.cpu),
 		}));
 	}, [selectedSessions]);
+
+	// Helper: map mode to color for consistent legend coloring
+	const modeColor = (mode: "ws" | "polling") =>
+		mode === "ws" ? theme.palette.info.main : theme.palette.secondary.main;
+
+	// Colors arrays matching series ordering
+	const colorsForSeries = (items: { mode: "ws" | "polling" }[]) =>
+		items.map(i => modeColor(i.mode));
 
 	// Memory (RSS + Heap) — two physical sub-metrics, still acceptable to plot together
 	const memSeries = useMemo(() => {
@@ -545,16 +555,51 @@ export default function SessionPanel() {
 
 	/* ------------------------------- Options ------------------------------- */
 
-	const cpuOptions = baseOptions("Zużycie CPU (%)", "%");
-	const memOptions = baseOptions("Pamięć procesu (MB)", "MB");
-	const eluOptions = baseOptions("Wykorzystanie pętli zdarzeń (ELU)", "ELU");
-	const loopOptions = baseOptions("Opóźnienie pętli zdarzeń p99 (ms)", "ms");
-	const eventsOptions = baseOptions("Zdarzenia na sekundę (/s)", "/s");
-	const bytesOptions = baseOptions("Przepływ bajtów (B/s)", "B/s");
-	const payloadSizeOptions = baseOptions("Średni rozmiar payloadu", "B");
-	const jitterOptions = baseOptions("Jitter inter-arrival (odch. std)", "ms");
-	const cpuPerUnitOptions = baseOptions("CPU na jednostkę danych", "%/evt");
-	const bytesPerUnitOptions = baseOptions("Bajty na jednostkę danych", "B/evt");
+	const cpuOptions: ApexOptions = {
+		...baseOptions("Zużycie CPU (%)", "%"),
+		colors: colorsForSeries(selectedSessions.map(s => ({ mode: s.config.mode }))),
+	};
+	const memOptions: ApexOptions = {
+		...baseOptions("Pamięć procesu (MB)", "MB"),
+		colors: colorsForSeries(
+			[
+				...selectedSessions.map(s => ({ mode: s.config.mode })),
+				...selectedSessions.map(s => ({ mode: s.config.mode })),
+			]
+		),
+	};
+	const eluOptions: ApexOptions = {
+		...baseOptions("Wykorzystanie pętli zdarzeń (ELU)", "ELU"),
+		colors: colorsForSeries(selectedSessions.map(s => ({ mode: s.config.mode }))),
+	};
+	const loopOptions: ApexOptions = {
+		...baseOptions("Opóźnienie pętli zdarzeń p99 (ms)", "ms"),
+		colors: colorsForSeries(selectedSessions.map(s => ({ mode: s.config.mode }))),
+	};
+	const eventsOptions: ApexOptions = {
+		...baseOptions("Zdarzenia na sekundę (/s)", "/s"),
+		colors: colorsForSeries(selectedSessions.map(s => ({ mode: s.config.mode }))),
+	};
+	const bytesOptions: ApexOptions = {
+		...baseOptions("Przepływ bajtów (B/s)", "B/s"),
+		colors: colorsForSeries(selectedSessions.map(s => ({ mode: s.config.mode }))),
+	};
+	const payloadSizeOptions: ApexOptions = {
+		...baseOptions("Średni rozmiar payloadu", "B"),
+		colors: colorsForSeries(selectedSessions.map(s => ({ mode: s.config.mode }))),
+	};
+	const jitterOptions: ApexOptions = {
+		...baseOptions("Jitter inter-arrival (odch. std)", "ms"),
+		colors: colorsForSeries(selectedSessions.map(s => ({ mode: s.config.mode }))),
+	};
+	const cpuPerUnitOptions: ApexOptions = {
+		...baseOptions("CPU na jednostkę danych", "%/evt"),
+		colors: colorsForSeries(selectedSessions.map(s => ({ mode: s.config.mode }))),
+	};
+	const bytesPerUnitOptions: ApexOptions = {
+		...baseOptions("Bajty na jednostkę danych", "B/evt"),
+		colors: colorsForSeries(selectedSessions.map(s => ({ mode: s.config.mode }))),
+	};
 
 	(eluOptions.yaxis as any).min = 0;
 	(eluOptions.yaxis as any).max = 1;
@@ -637,12 +682,12 @@ export default function SessionPanel() {
 											{a.avgRss.toFixed(1)}
 										</td>
 										<td style={{ padding: 4, textAlign: "right" }}>
-											<span style={{ color: colorFor(a.avgElu, "elu", (window as any).muiTheme || ({} as any)) }}>
+											<span style={{ color: colorFor(a.avgElu, "elu") }}>
 												{a.avgElu.toFixed(2)}
 											</span>
 										</td>
 										<td style={{ padding: 4, textAlign: "right" }}>
-											<span style={{ color: colorFor(a.avgDelayP99, "p99", (window as any).muiTheme || ({} as any)) }}>
+											<span style={{ color: colorFor(a.avgDelayP99, "p99") }}>
 												{a.avgDelayP99.toFixed(1)}
 											</span>
 										</td>
@@ -662,7 +707,7 @@ export default function SessionPanel() {
 											{a.avgBytesPayload.toFixed(0)}
 										</td>
 										<td style={{ padding: 4, textAlign: "right" }}>
-											<span style={{ color: colorFor(a.avgJitterMs, "jitter", (window as any).muiTheme || ({} as any)) }}>
+											<span style={{ color: colorFor(a.avgJitterMs, "jitter") }}>
 												{a.avgJitterMs.toFixed(1)}
 											</span>
 										</td>
