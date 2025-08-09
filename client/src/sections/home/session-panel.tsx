@@ -424,6 +424,9 @@ export default function SessionPanel() {
 	// Helper: map mode to color for consistent legend coloring
 	const modeColor = (mode: "ws" | "polling") =>
 		mode === "ws" ? theme.palette.info.main : theme.palette.secondary.main;
+	const modeColorLight = (mode: "ws" | "polling") =>
+		mode === "ws" ? theme.palette.info.light : theme.palette.secondary.light;
+	const modeColorStrong = modeColor;
 
 	// Colors arrays matching series ordering
 	const colorsForSeries = (items: { mode: "ws" | "polling" }[]) =>
@@ -561,12 +564,18 @@ export default function SessionPanel() {
 	};
 	const memOptions: ApexOptions = {
 		...baseOptions("Pamięć procesu (MB)", "MB"),
-		colors: colorsForSeries(
-			[
-				...selectedSessions.map(s => ({ mode: s.config.mode })),
-				...selectedSessions.map(s => ({ mode: s.config.mode })),
-			]
-		),
+		colors: [
+			...selectedSessions.map(s => modeColorStrong(s.config.mode)), // RSS
+			...selectedSessions.map(s => modeColorLight(s.config.mode)), // Heap
+		],
+		stroke: {
+			curve: "smooth",
+			width: 2,
+			dashArray: [
+				...Array(selectedSessions.length).fill(0), // RSS solid
+				...Array(selectedSessions.length).fill(5), // Heap dashed
+			],
+		},
 	};
 	const eluOptions: ApexOptions = {
 		...baseOptions("Wykorzystanie pętli zdarzeń (ELU)", "ELU"),
