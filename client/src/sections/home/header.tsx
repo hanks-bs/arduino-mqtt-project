@@ -18,6 +18,7 @@ export default function Header() {
 					component='img'
 					src='/logo-pk.png' // ścieżka do Twojego logo
 					alt='Logo Politechniki Krakowskiej'
+					title='Politechnika Krakowska'
 					sx={{
 						height: 48,
 						mr: 2,

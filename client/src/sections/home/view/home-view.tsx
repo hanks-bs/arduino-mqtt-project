@@ -58,9 +58,10 @@ export function HomeView() {
 			pollingRef.current = null;
 		}
 		if (mode === "polling" && auto) {
+			const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5000";
 			const fetchData = async () => {
 				try {
-					const res = await fetch("http://localhost:5000/api/arduino-data");
+					const res = await fetch(`${API_BASE}/api/arduino-data`);
 					const json = await res.json();
 					if (json.success && typeof json.data === "string") {
 						setPayload(JSON.parse(json.data));
@@ -82,8 +83,9 @@ export function HomeView() {
 
 	// ręczne odświeżenie w trybie manualnym
 	const manualRefresh = async () => {
+		const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5000";
 		try {
-			const res = await fetch("http://localhost:5000/api/arduino-data");
+			const res = await fetch(`${API_BASE}/api/arduino-data`);
 			const json = await res.json();
 			if (json.success && typeof json.data === "string") {
 				setPayload(JSON.parse(json.data));

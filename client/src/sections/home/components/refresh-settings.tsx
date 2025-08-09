@@ -32,6 +32,9 @@ export default function RefreshSettings({
 		<Box my={3}>
 			<Typography gutterBottom>Interwał odświeżania: {interval}s</Typography>
 			<Slider
+				aria-label='Interwał odświeżania w sekundach'
+				getAriaValueText={v => `${v} sekund`}
+				aria-valuetext={`${interval} sekund`}
 				value={interval}
 				min={1}
 				max={30}
