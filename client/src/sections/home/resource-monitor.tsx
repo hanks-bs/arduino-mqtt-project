@@ -4,6 +4,7 @@
 import type { LiveMetrics } from "@/types/monitoring";
 import { useSocketIOEvent } from "@/websocket/providers/websocket-provider";
 import { Box, Chip, Grid, Paper, Stack } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import type { ApexOptions } from "apexcharts";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
@@ -18,6 +19,7 @@ export default function ResourceMonitor() {
 	const metric = useSocketIOEvent<LiveMetrics>("metrics");
 	const [series, setSeries] = useState<LiveMetrics[]>([]);
 	const windowSize = 300;
+	const theme = useTheme();
 
 	useEffect(() => {
 		if (!metric) return;
@@ -65,7 +67,11 @@ export default function ResourceMonitor() {
 			data: series.map(s => Number(s.heapUsedMB.toFixed(2))),
 		},
 	];
-	const memOptions = makeBase("Pamięć (MB)", "MB");
+	const memOptions = {
+		...makeBase("Pamięć (MB)", "MB"),
+		colors: [theme.palette.info.main, theme.palette.info.light],
+		stroke: { curve: "smooth", width: 2, dashArray: [0, 5] },
+	} as ApexOptions;
 
 	const eluSeries = [
 		{ name: "ELU (0..1)", data: series.map(s => Number(s.elu.toFixed(4))) },
@@ -89,7 +95,15 @@ export default function ResourceMonitor() {
 			data: series.map(s => Number(s.elDelayMaxMs.toFixed(3))),
 		},
 	];
-	const loopDelayOptions = makeBase("Opóźnienie pętli zdarzeń (ms)", "ms");
+	const loopDelayOptions = {
+		...makeBase("Opóźnienie pętli zdarzeń (ms)", "ms"),
+		colors: [
+			theme.palette.success.main, // p50
+			theme.palette.warning.main, // p99
+			theme.palette.error.main, // max
+		],
+		stroke: { curve: "smooth", width: 2, dashArray: [0, 5, 2] },
+	} as ApexOptions;
 
 	const rateSeries = [
 		{
