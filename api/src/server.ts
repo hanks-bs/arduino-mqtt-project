@@ -100,15 +100,17 @@ const io: SocketIOServer = initWebSockets(server);
 // Initialize MQTT subscription - save the latest data globally
 initMqttSubscriber();
 
-// Every 2 seconds we read data and publish to the broker
+// Every 1 second we read data and publish to the broker (deduplicated)
 setInterval(async () => {
   try {
-    const data = await ArduinoDataService.process();
-    console.log('Opublikowano dane do broker’a:', data);
+    const { data, published } = await ArduinoDataService.process();
+    if (published) {
+      console.log('Opublikowano dane do broker’a');
+    }
   } catch (error) {
     console.error('Błąd podczas odczytu i publikacji danych:', error);
   }
-}, 2000);
+}, 1000);
 
 io.on('connection', socket => {
   console.log(`Nowy klient połączony przez WebSocket, id: ${socket.id}`);
