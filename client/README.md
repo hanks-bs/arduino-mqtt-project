@@ -22,9 +22,8 @@ Monitor live Arduino sensor readings (potentiometer value & temperature) and ser
 10. [Runtime Modes: WebSocket vs Polling](#runtime-modes-websocket-vs-polling)
 11. [Available Scripts](#available-scripts)
 12. [Quality & Performance Considerations](#quality--performance-considerations)
-13. [Future Improvements](#future-improvements)
-14. [License](#license)
-15. [Support / Questions](#support--questions)
+13. [License](#license)
+14. [Support / Questions](#support--questions)
 
 ---
 
@@ -248,18 +247,9 @@ yarn start
 - WebSocket payloads typed to avoid runtime shape errors.
 - ApexCharts configuration tuned for live streaming (animations & smooth transitions).
 - Single source of truth for telemetry via context provider avoids prop drilling.
-- Potential future optimization: windowing/pruning large historical arrays to cap memory.
+ 
 
 ---
-
-## Future Improvements
-
-- Historical persistence (e.g., time‑range selection & DB integration)
-- Offline buffering & replay once connection restores
-- Theme switching (light/dark toggle in UI)
-- Progressive Web App enhancements (service worker caching)
-- Advanced alerting (threshold breach notifications)
-- Download / export session datasets (CSV / JSON)
 
 > ℹ️ Internationalization (i18n) is intentionally not implemented at this time.
 

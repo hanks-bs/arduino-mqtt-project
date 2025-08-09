@@ -173,12 +173,6 @@ docker compose up -d
 docker compose down -v
 ```
 
-## 10. Następne kroki
-
-- Dodać trwałość historii (np. Redis / DB) jeśli wymagana persystencja.
-- Zabezpieczenie `/api/arduino-data` nagłówkiem API key / auth.
-- Eksport metryk w formacie Prometheus.
-
 ---
 
 Gotowe – przejdź do sekcji odpowiedniej dla Twojego systemu (2.1 lub 2.2) i uruchom projekt.

@@ -27,8 +27,7 @@ Lightweight TypeScript/Express backend that ingests real‑time Arduino sensor d
 15. [Testing](#testing)
 16. [Security Notes](#security-notes)
 17. [Troubleshooting](#troubleshooting)
-18. [Future Improvements](#future-improvements)
-19. [License](#license)
+18. [License](#license)
 
 ---
 
@@ -337,17 +336,6 @@ Recommended additional test areas:
 
 ---
 
-## Future Improvements
-
-- Persistent storage (e.g. InfluxDB / Timescale) for long‑term history.
-- Pluggable authentication & API keys.
-- Structured logging (pino) & log shipping.
-- Graceful shutdown hooks (close serial & flush sessions to disk).
-- MQTT connection reuse (publish without reconnect cost).
-- Configurable history window size & eviction policy.
-
----
-
 ## License
 
 Add license information (e.g. MIT) here.
@@ -362,6 +350,7 @@ Issues & PRs welcome. Please run `yarn format` before submitting.
 
 ### Quick Reference
 
+ 
 ```bash
 # Dev
 yarn dev

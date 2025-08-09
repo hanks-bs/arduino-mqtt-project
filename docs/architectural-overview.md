@@ -84,7 +84,7 @@ Sesje pomiarowe:
 - Przechowują kolejne próbki metryk w pamięci.
 - Można zakończyć `POST /api/monitor/stop` lub automatycznie po `sampleCount`/`durationSec`.
 
-## 8. Metodologia porównania (propozycja do pracy magisterskiej)
+## 8. Metodologia porównania
 
 ### 8.1 Cel
 
@@ -181,12 +181,7 @@ Uwagi: Pozornie niższy koszt jednostkowy przy bardzo częstym pollingu wynika z
 | Pamięć historii     | Trzymana w RAM          | Przeniesienie do Redis / bazy time-series       |
 | WebSocket broadcast | O(n) emisja             | Sharding namespaces / adapter Redis             |
 
-## 11. Możliwe rozszerzenia badawcze
-
-- Dodanie metryk systemowych (cgroups / Docker stats) dla korelacji.
-- Ekspozycja Prometheus + Grafana dashboard.
-- Wprowadzenie backpressure dla zbyt szybkich strumieni.
-- Porównanie z SSE (Server-Sent Events) jako trzeciego wariantu.
+ 
 
 ## 12. Przykładowe skrypty obciążeniowe (symulacja klientów)
 
