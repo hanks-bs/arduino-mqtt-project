@@ -24,7 +24,7 @@ Kluczowe komponenty:
 - SerialService — odporna obsługa portu z reconnect/backoff
 - ArduinoDataService — pobiera ostatnią linię z serial i publikuje do MQTT (retain)
 - MqttSubscriber — waliduje ładunki, dodaje znacznik czasu, utrzymuje historię, emituje WS
-- ResourceMonitorService — CPU/pamięć/ELU/opóźnienia pętli, przepływność, jitter, świeżość; sesje; CSV
+- ResourceMonitorService — CPU/pamięć/ELU/opóźnienia pętli, przepływność, jitter, staleness (wiek danych); sesje; CSV
 - WebSocket Provider (client) — zarządza cyklem życia gniazda; wykresy i KPI w sekcjach
 
 ---
@@ -152,7 +152,7 @@ Zdarzenia WebSocket:
 - Przepływność: HTTP req/s, WS msg/s, bajty/s (HTTP, WS) oraz skumulowane sumy
 - Średnie rozmiary ładunków (bajty/req, bajty/msg)
 - Jitter: odchylenie standardowe odstępów (HTTP, WS)
-- Świeżość danych: ms od ostatniego timestamp z Arduino (niżej=lepiej)
+- Staleness (wiek danych): ms od ostatniego timestamp z Arduino (niżej=lepiej)
 
 Sesje zapisują próbki i opcjonalnie uruchamiają z API deterministyczne sprawdzanie HTTP (polling).
 
@@ -186,11 +186,11 @@ Sesje zapisują próbki i opcjonalnie uruchamiają z API deterministyczne sprawd
 
 Po stronie API dostępny jest kompletny mechanizm pomiarów, eksportu i aktualizacji dokumentacji.
 
-- Uruchom pełny zestaw pomiarowy (artefakty w `api/benchmarks/<timestamp>/`):
+- Uruchom pełny zestaw pomiarowy (pliki wynikowe w `api/benchmarks/<timestamp>/`):
   - `yarn measure` (z katalogu `api/`)
-- Artefakty jednego uruchomienia:
+- Pliki wynikowe jednego uruchomienia:
   - `sessions.csv` — spłaszczone próbki sesji (WS i HTTP)
-  - `summary.json` — agregaty (średnie, ELU p99, jitter, freshness)
+  - `summary.json` — agregaty (średnie, ELU p99, jitter, staleness)
   - `README.md` — podsumowanie z mapowaniem do dashboardu
 - Zaktualizuj dokument badawczy o ostatnie wyniki (sekcja auto w `docs/ASPEKT_BADAWCZY.md`):
   - `yarn docs:research:update` (z katalogu `api/`)

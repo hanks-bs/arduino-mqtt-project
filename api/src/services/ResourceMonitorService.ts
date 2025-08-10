@@ -24,6 +24,8 @@ export interface LiveMetrics {
   heapTotalMB: number;
   externalMB: number;
   arrayBuffersMB: number;
+  /** Actual time between samples measured monotonically (ms). Helps assess scheduler jitter. */
+  tickMs: number;
 
   elu: number; // Event Loop Utilization (0..1)
   elDelayP50Ms: number; // event loop delay percentiles
@@ -79,6 +81,8 @@ export interface SessionConfig {
   clientsHttp?: number;
   /** Optional: number of synthetic WebSocket clients (internal). */
   clientsWs?: number;
+  /** Optional: reset cumulative counters at session start (for clean totals). */
+  resetCounters?: boolean;
 }
 
 export interface SessionRecord {
@@ -131,6 +135,8 @@ class ResourceMonitorService {
 
   // rolling for per-second rates
   private lastTickAt = Date.now();
+  // monotonic baseline for dt calculation (ms since start)
+  private lastTickMonoMs = performance.now();
   private lastHttpRequests = 0;
   private lastWsMessages = 0;
   private lastHttpBytes = 0;
@@ -146,12 +152,7 @@ class ResourceMonitorService {
   private tickInterval: NodeJS.Timeout | null = null;
   private histogram = monitorEventLoopDelay({ resolution: 20 });
   private lastElu: ELU = performance.eventLoopUtilization();
-  private readonly monitorTickMs: number = (() => {
-    const v = Number(
-      process.env.MONITOR_TICK_MS || process.env.LIVE_MONITOR_TICK_MS || 1000,
-    );
-    return Number.isFinite(v) && v >= 200 ? v : 1000;
-  })();
+  private monitorTickMs: number = 1000;
 
   // sessions
   private sessions = new Map<string, SessionRecord>();
@@ -185,6 +186,15 @@ class ResourceMonitorService {
   init(io: SocketIOServer) {
     this.io = io;
     this.histogram.enable();
+    // Read desired tick from environment at init-time (allows CLI to override)
+    try {
+      const v = Number(
+        process.env.MONITOR_TICK_MS || process.env.LIVE_MONITOR_TICK_MS || 1000,
+      );
+      this.monitorTickMs = Number.isFinite(v) && v >= 200 ? v : 1000;
+    } catch {
+      this.monitorTickMs = 1000;
+    }
     // Informational log only once at startup
     try {
       console.log(
@@ -193,6 +203,10 @@ class ResourceMonitorService {
     } catch {}
 
     if (!this.tickInterval) {
+      // align monotonic baseline just before starting the loop
+      try {
+        this.lastTickMonoMs = performance.now();
+      } catch {}
       this.tickInterval = setInterval(() => this.tick(), this.monitorTickMs);
       // do not keep the process alive solely because of this timer
       this.tickInterval.unref();
@@ -307,6 +321,16 @@ class ResourceMonitorService {
           : config.pollingIntervalMs,
     };
 
+    // Optionally reset cumulative counters to zero for clean totals
+    if (config.resetCounters) {
+      this.totalHttpRequests = 0;
+      this.totalWsMessages = 0;
+      this.totalHttpBytes = 0;
+      this.totalWsBytes = 0;
+    }
+    // Reset rolling/windows state to avoid contamination from previous sessions (align baselines)
+    this.resetRollingState();
+
     const rec: SessionRecord = {
       id,
       config: cfg,
@@ -416,6 +440,7 @@ class ResourceMonitorService {
     this.stopWsDriver();
     this.stopLoad();
     this.stopWsClients();
+    this.resetRollingState();
     // restore emission flag if it was overridden
     if (this.prevLiveEmitBeforeSession !== null && this.forcedEmitForSession) {
       this.setLiveEmitEnabled(this.prevLiveEmitBeforeSession);
@@ -471,8 +496,9 @@ class ResourceMonitorService {
   }
 
   private async computeMetrics(): Promise<LiveMetrics> {
-    const now = Date.now();
-    const dtSec = Math.max(0.001, (now - this.lastTickAt) / 1000);
+    const nowWall = Date.now();
+    const nowMono = performance.now();
+    const dtSec = Math.max(0.001, (nowMono - this.lastTickMonoMs) / 1000);
 
     // pidusage can fail on some Windows setups; fall back gracefully
     let usageCpu = 0;
@@ -525,7 +551,8 @@ class ResourceMonitorService {
     }
 
     // update "last" counters
-    this.lastTickAt = now;
+    this.lastTickAt = nowWall;
+    this.lastTickMonoMs = nowMono;
     this.lastHttpRequests = this.totalHttpRequests;
     this.lastWsMessages = this.totalWsMessages;
     this.lastHttpBytes = this.totalHttpBytes;
@@ -541,6 +568,7 @@ class ResourceMonitorService {
       arrayBuffersMB:
         // arrayBuffers is not present in very old Node versions
         (mem as any).arrayBuffers ? (mem as any).arrayBuffers / 1024 / 1024 : 0,
+      tickMs: dtSec * 1000,
 
       elu: currentElu.utilization,
       elDelayP50Ms: p50,
@@ -765,6 +793,34 @@ class ResourceMonitorService {
     const variance =
       arr.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (arr.length - 1);
     return Math.sqrt(variance);
+  }
+
+  /** Clears jitter windows and aligns delta baselines to current totals to start fresh. */
+  private resetRollingState() {
+    // clear inter-arrival windows (jitter)
+    this.wsIntervals = [];
+    this.httpIntervals = [];
+    this.lastWsMessageAt = null;
+    this.lastHttpResponseAt = null;
+    this.lastArduinoTimestamp = null;
+    // align delta baselines to current cumulative counters
+    this.lastHttpRequests = this.totalHttpRequests;
+    this.lastWsMessages = this.totalWsMessages;
+    this.lastHttpBytes = this.totalHttpBytes;
+    this.lastWsBytes = this.totalWsBytes;
+    // reset EL delay histogram stats
+    try {
+      this.histogram.reset();
+    } catch {}
+    // reset ELU baseline
+    try {
+      this.lastElu = performance.eventLoopUtilization();
+    } catch {}
+    // reset dt baseline to now to avoid a long first interval
+    this.lastTickAt = Date.now();
+    try {
+      this.lastTickMonoMs = performance.now();
+    } catch {}
   }
 }
 

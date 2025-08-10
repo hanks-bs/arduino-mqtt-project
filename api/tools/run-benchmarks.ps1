@@ -5,7 +5,8 @@
 .DESCRIPTION
   Owijka dla "npm run measure" (measurementRunner.ts) odporna na PowerShell/Windows.
   Pozwala ustawić: metody, zestaw Hz, zestaw obciążeń, czas sesji, tick monitora i liczbę klientów.
-  Po zakończeniu wypisuje ścieżkę do najnowszego katalogu z artefaktami (benchmarks/<timestamp>/).
+  Po zakończeniu wypisuje ścieżkę do najnowszego katalogu z plikami wynikowymi (benchmarks/<timestamp>/).
+  Domyślnie stosuje trimming warmup/cooldown (0.5 s / 0.5 s), które można nadpisać.
 
 .PARAMETER Modes
   Lista metod, np. "ws,polling" (domyślnie: ws,polling)
@@ -28,6 +29,12 @@
 .PARAMETER ClientsWs
   Liczba syntetycznych klientów WebSocket. Domyślnie 0.
 
+.PARAMETER Warmup
+  Czas odrzucany na początku każdej sesji (sekundy). Domyślnie 0.5.
+
+.PARAMETER Cooldown
+  Czas odrzucany na końcu każdej sesji (sekundy). Domyślnie 0.5.
+
 .EXAMPLE
   pwsh -File ./api/tools/run-benchmarks.ps1 -Modes "ws,polling" -Hz "1,2" -Load "0,25,50" -Duration 6 -Tick 200
 
@@ -44,7 +51,9 @@ param(
   [int]$Duration = 6,
   [int]$Tick = 200,
   [int]$ClientsHttp = 0,
-  [int]$ClientsWs = 0
+  [int]$ClientsWs = 0,
+  [double]$Warmup = 0.5,
+  [double]$Cooldown = 0.5
 )
 
 Set-StrictMode -Version Latest
@@ -59,6 +68,7 @@ try {
   $args = @('--', '--modes', $Modes, '--hz', $Hz, '--load', $Load, '--dur', "$Duration", '--tick', "$Tick")
   if ($ClientsHttp -gt 0) { $args += @('--clientsHttp', "$ClientsHttp") }
   if ($ClientsWs -gt 0)   { $args += @('--clientsWs',   "$ClientsWs") }
+  $args += @('--warmup', "$Warmup", '--cooldown', "$Cooldown")
 
   # Uruchom benchmark
   & npm.cmd run measure --silent @args

@@ -25,8 +25,8 @@ System realizuje akwizycję danych sensorycznych z Arduino, ich ujednolicenie w 
 - periodicznie (co ~1 s) publikuje metryki i może retransmitować dane (zależnie od konfiguracji),
 - emituje dane do klientów przez Socket.IO event `arduinoData`.
 
-4. UI odbiera eventy i aktualizuje wykresy / komponenty.
-5. Resource Monitor co sekundę oblicza metryki i wysyła event `metrics`.
+1. UI odbiera eventy i aktualizuje wykresy / komponenty.
+2. Resource Monitor co sekundę oblicza metryki i wysyła event `metrics`.
 
 ### 3.1 Diagram przepływu (Mermaid)
 
@@ -386,4 +386,4 @@ for (let i = 0; i < N; i++) start();
 
 ## 13. Podsumowanie
 
-Dokument przedstawia wewnętrzną architekturę, strumień danych, mechanizmy niezawodności, wskaźniki analityczne i metodykę badań porównawczych WebSocket vs HTTP Polling. Materiał może zasilić rozdziały: "Opis systemu", "Metodyka badań", "Analiza wyników" w pracy magisterskiej.
+Dokument przedstawia wewnętrzną architekturę, strumień danych, mechanizmy niezawodności, wskaźniki analityczne i metodykę badań porównawczych WebSocket vs HTTP Polling.

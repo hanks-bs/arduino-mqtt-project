@@ -78,6 +78,7 @@ class MonitorController {
         loadWorkers: body.loadWorkers,
         clientsHttp: body.clientsHttp,
         clientsWs: body.clientsWs,
+        resetCounters: body.resetCounters,
       };
       const rec = ResourceMonitor.startSession(cfg);
       return res.status(201).json({ success: true, data: rec });

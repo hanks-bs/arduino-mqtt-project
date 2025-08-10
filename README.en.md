@@ -24,7 +24,7 @@ Key components:
 - SerialService — robust port handling with reconnect/backoff
 - ArduinoDataService — reads latest serial line and publishes to MQTT (retain)
 - MqttSubscriber — validates payloads, enriches with timestamp, maintains history, emits WS
-- ResourceMonitorService — CPU/memory/ELU/event‑loop delay, throughput, jitter, freshness; sessions; CSV export
+- ResourceMonitorService — CPU/memory/ELU/event‑loop delay, throughput, jitter, staleness; sessions; CSV export
 - Client WS Provider — central socket lifecycle and context; charts and KPIs across sections
 
 ---
@@ -152,7 +152,7 @@ WebSocket events:
 - Throughput: HTTP req/s, WS msg/s, HTTP and WS bytes/s, cumulative totals
 - Average payload sizes (HTTP bytes/req, WS bytes/msg)
 - Jitter: stdDev of inter‑arrival intervals (HTTP, WS)
-- Data freshness: milliseconds since last Arduino timestamp (lower is fresher)
+- Staleness (data age): milliseconds since last Arduino timestamp (lower is fresher)
 
 Sessions can record these samples and optionally drive deterministic HTTP polling traffic from the API itself.
 
@@ -190,7 +190,7 @@ The API provides a complete measurement pipeline, export, and auto‑update of t
   - `yarn measure` (from `api/`)
 - Artifacts per run:
   - `sessions.csv` — flattened per‑second samples for WS and HTTP
-  - `summary.json` — aggregates (averages, ELU p99, jitter, freshness)
+  - `summary.json` — aggregates (averages, ELU p99, jitter, staleness)
   - `README.md` — human‑readable summary mapped to the dashboard
 - Update the research document with the latest results (auto section in `docs/ASPEKT_BADAWCZY.md`):
   - `yarn docs:research:update` (from `api/`)

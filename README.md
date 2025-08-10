@@ -153,11 +153,11 @@ Uwaga (testy): w celu ograniczenia zniekształceń podczas pomiarów można tymc
 
 Pomiarów dokonujemy po stronie API. Zaimplementowany jest kompletny „measurement runner”, eksport wyników oraz automatyczna aktualizacja dokumentu badawczego.
 
-- Uruchomienie pomiaru (zapisuje artefakty do `api/benchmarks/<timestamp>/`):
+- Uruchomienie pomiaru (zapisuje pliki wynikowe do `api/benchmarks/<timestamp>/`):
   - z katalogu `api/`: `yarn measure`
-- Artefakty jednego uruchomienia:
+- Pliki wynikowe jednego uruchomienia:
   - `sessions.csv` – spłaszczone próbki z sesji (WS i HTTP)
-  - `summary.json` – agregaty (średnie, ELU p99, jitter, freshness)
+  - `summary.json` – agregaty (średnie, ELU p99, jitter, staleness)
   - `README.md` – skrót wyników z mapowaniem do dashboardu
 - Aktualizacja sekcji „Wyniki ostatnich pomiarów (auto)” w `docs/ASPEKT_BADAWCZY.md`:
   - z katalogu `api/`: `yarn docs:research:update`

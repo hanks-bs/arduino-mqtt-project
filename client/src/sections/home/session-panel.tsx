@@ -23,7 +23,9 @@ import {
 	FormControlLabel,
 	Grid,
 	InputAdornment,
+	MenuItem,
 	Paper,
+	Select,
 	Stack,
 	Tab,
 	Tabs,
@@ -172,6 +174,7 @@ export default function SessionPanel() {
 	// Sessions state
 	const [sessions, setSessions] = useState<SessionRecord[]>([]);
 	const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+	const [previewId, setPreviewId] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [tab, setTab] = useState<"quick" | "advanced">("quick");
 
@@ -242,6 +245,28 @@ export default function SessionPanel() {
 				cooldownSec: 5,
 			},
 		},
+		{
+			name: "WS 1 Hz — 25 klientów (synt.)",
+			cfg: {
+				mode: "ws",
+				wsFixedRateHz: 1,
+				durationSec: 90,
+				warmupSec: 5,
+				cooldownSec: 5,
+				clientsWs: 25,
+			},
+		},
+		{
+			name: "HTTP 1 Hz — 25 klientów (synt.)",
+			cfg: {
+				mode: "polling",
+				pollingIntervalMs: 1000,
+				durationSec: 90,
+				warmupSec: 5,
+				cooldownSec: 5,
+				clientsHttp: 25,
+			},
+		},
 	];
 
 	const applyPreset = (p: Preset) => {
@@ -310,12 +335,23 @@ export default function SessionPanel() {
 				next.add(list[0].id);
 			}
 			setSelectedIds(next);
+			// Ustaw domyślny podgląd na pierwszą z wybranych
+			const first = [...next][0];
+			setPreviewId(first ?? null);
 		} else {
 			// drop selections for removed sessions
 			const still = new Set(list.map(s => s.id));
-			setSelectedIds(prev => new Set([...prev].filter(id => still.has(id))));
+			setSelectedIds(prev => {
+				const kept = new Set([...prev].filter(id => still.has(id)));
+				// Jeśli podgląd wskazuje sesję, której już nie ma lub nie jest wybrana — ustaw na pierwszą dostępną
+				if (!kept.has(previewId || "")) {
+					const first = [...kept][0] || null;
+					setPreviewId(first);
+				}
+				return kept;
+			});
 		}
-	}, [selectedIds.size]);
+	}, [selectedIds.size, previewId]);
 
 	useEffect(() => {
 		reload().catch(console.error);
@@ -408,7 +444,12 @@ export default function SessionPanel() {
 		[sessions, selectedIds]
 	);
 
-	const firstSelected = selectedSessions[0];
+	// Sesja do podglądu próbek — wybór użytkownika lub pierwsza z wybranych
+	const previewed = useMemo(() => {
+		if (selectedSessions.length === 0) return undefined;
+		const found = selectedSessions.find(s => s.id === previewId);
+		return found || selectedSessions[0];
+	}, [selectedSessions, previewId]);
 
 	interface Aggregates {
 		id: string;
@@ -946,11 +987,15 @@ export default function SessionPanel() {
 						variant='outlined'
 						label='Bajty/jednostkę – jak najniżej'
 					/>
-					<Chip
-						color='success'
-						variant='outlined'
-						label='Świeżość danych – jak najniższa (ms)'
-					/>
+					<Tooltip title='Staleness (wiek danych) — czas od znacznika czasu ostatniego odczytu z urządzenia do chwili pomiaru; niżej = świeższe dane.'>
+						<span>
+							<Chip
+								color='success'
+								variant='outlined'
+								label='Staleness (wiek danych) – jak najniższy [ms]'
+							/>
+						</span>
+					</Tooltip>
 				</Stack>
 				{bestAggregate && (
 					<Alert severity='success'>
@@ -1000,7 +1045,9 @@ export default function SessionPanel() {
 									</th>
 									<th style={{ textAlign: "right", padding: 4 }}>Jitter ms</th>
 									<th style={{ textAlign: "right", padding: 4 }}>
-										Świeżość ms
+										<Tooltip title='Staleness (wiek danych) — czas od znacznika czasu ostatniego odczytu z urządzenia do chwili pomiaru; niżej = świeższe dane.'>
+											<span>Staleness [ms]</span>
+										</Tooltip>
 									</th>
 								</tr>
 							</thead>
@@ -1107,7 +1154,7 @@ export default function SessionPanel() {
 									{p99Delta.toFixed(1)} (niżej = lepiej)
 								</li>
 								<li>
-									<strong>Świeżość danych (ms):</strong> Δ HTTP–WS ={" "}
+									<strong>Staleness (ms):</strong> Δ HTTP–WS ={" "}
 									{freshDelta.toFixed(0)} (niżej = świeższe)
 								</li>
 							</Box>
@@ -1116,16 +1163,27 @@ export default function SessionPanel() {
 				</Paper>
 			) : null}
 
-			{firstSelected && (
+			{previewed && (
 				<Paper sx={{ p: 2, mb: 3 }}>
 					<Stack
 						direction='row'
 						justifyContent='space-between'
 						alignItems='center'
 						mb={1}>
-						<Typography variant='subtitle1'>
-							Próbki (pierwsza wybrana sesja): {firstSelected.config.label}
-						</Typography>
+						<Stack direction='row' spacing={1} alignItems='center'>
+							<Typography variant='subtitle1'>Podgląd próbek:</Typography>
+							<Select
+								value={previewed.id}
+								sx={{ minWidth: 260 }}
+								onChange={e => setPreviewId(String(e.target.value))}
+								size='small'>
+								{selectedSessions.map(s => (
+									<MenuItem key={s.id} value={s.id}>
+										{`${s.config.label} — ${sessionConfigSignature(s)}`}
+									</MenuItem>
+								))}
+							</Select>
+						</Stack>
 						<Stack direction='row' spacing={2}>
 							<Button
 								size='small'
@@ -1154,15 +1212,19 @@ export default function SessionPanel() {
 									<th style={{ textAlign: "right", padding: 4 }}>B/s</th>
 									<th style={{ textAlign: "right", padding: 4 }}>B/payload</th>
 									<th style={{ textAlign: "right", padding: 4 }}>Jitter</th>
-									<th style={{ textAlign: "right", padding: 4 }}>Fresh ms</th>
+									<th style={{ textAlign: "right", padding: 4 }}>
+										<Tooltip title='Staleness (wiek danych) — czas od znacznika czasu ostatniego odczytu z urządzenia do chwili pomiaru; niżej = świeższe dane.'>
+											<span>Staleness [ms]</span>
+										</Tooltip>
+									</th>
 								</tr>
 							</thead>
 							<tbody>
 								{(() => {
-									const all = firstSelected.samples;
+									const all = previewed.samples;
 									const slice = all.slice(-200);
 									const startIndex = Math.max(0, all.length - slice.length);
-									const isHttp = firstSelected.config.mode === "polling";
+									const isHttp = previewed.config.mode === "polling";
 									return slice.map((m, i) => {
 										const rate = isHttp ? m.httpReqRate : m.wsMsgRate;
 										const bytes = isHttp ? m.httpBytesRate : m.wsBytesRate;
@@ -1643,7 +1705,8 @@ export default function SessionPanel() {
 				<Typography variant='body2'>
 					Testy wykonuj sekwencyjnie, z identycznymi parametrami częstotliwości,
 					w możliwie izolatowanym środowisku. Następnie porównuj wartości
-					agregatów i wskaźniki pochodne (CPU/jedn., B/jedn., jitter).
+					uśrednionych wyników i wskaźników pochodnych (CPU/jedn., B/jedn.,
+					jitter).
 				</Typography>
 			</Paper>
 

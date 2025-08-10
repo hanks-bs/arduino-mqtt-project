@@ -34,20 +34,32 @@
 .PARAMETER Repeats
   Liczba powtórzeń każdej kombinacji (domyślnie: 1)
 
+.PARAMETER LoadWorkersSet
+  Zestaw liczby wątków generatora obciążenia CPU (worker_threads), np. "1,2,4" (domyślnie: 1)
+
+.PARAMETER Warmup
+  Czas odrzucany na początku sesji (sekundy). Domyślnie 0.5.
+
+.PARAMETER Cooldown
+  Czas odrzucany na końcu sesji (sekundy). Domyślnie 0.5.
+
 .EXAMPLE
-  pwsh -File ./api/tools/orchestrate-benchmarks.ps1 -Hz "1,2" -Load "0,25,50" -DurationSet "6" -TickSet "200" -ClientsHttpSet "0,3" -ClientsWsSet "0,3" -Repeats 2
+  pwsh -File ./api/tools/orchestrate-benchmarks.ps1 -Hz "1,2" -Load "0,25,50" -DurationSet "6" -TickSet "200" -ClientsHttpSet "0,10,25,50" -ClientsWsSet "0,10,25,50" -Repeats 1
 #>
 
 [CmdletBinding()]
 param(
   [string]$Modes = "ws,polling",
-  [string]$Hz = "1,2",
+  [string]$Hz = "0.5,1,2,5",
   [string]$Load = "0,25,50",
   [string]$DurationSet = "6",
-  [string]$TickSet = "150,200",
-  [string]$ClientsHttpSet = "0,3",
-  [string]$ClientsWsSet = "0,3",
-  [int]$Repeats = 1
+  [string]$TickSet = "200",
+  [string]$ClientsHttpSet = "0,10,25,50",
+  [string]$ClientsWsSet = "0,10,25,50",
+  [string]$LoadWorkersSet = "1",
+  [int]$Repeats = 1,
+  [double]$Warmup = 0.5,
+  [double]$Cooldown = 0.5
 )
 
 Set-StrictMode -Version Latest
@@ -65,6 +77,8 @@ $cHttpSet  = @(Parse-IntList $ClientsHttpSet)
 if ($cHttpSet.Count -eq 0) { $cHttpSet = @(0) }
 $cWsSet    = @(Parse-IntList $ClientsWsSet)
 if ($cWsSet.Count -eq 0) { $cWsSet = @(0) }
+$wSet      = @(Parse-IntList $LoadWorkersSet)
+if ($wSet.Count -eq 0) { $wSet = @(1) }
 
 # Przejdź do katalogu api/
 Push-Location (Join-Path $PSScriptRoot '..')
@@ -74,85 +88,93 @@ try {
   $indexCsv = Join-Path $benchRoot '_index.csv'
   $allCsv   = Join-Path $benchRoot '_all_summaries.csv'
   if (-not (Test-Path $indexCsv)) {
-    'timestampDir,modes,hz,load,durationSec,tickMs,clientsHttp,clientsWs,sessionsCount,wsCount,httpCount,path' | Out-File -FilePath $indexCsv -Encoding utf8
+  'timestampDir,modes,hz,load,loadWorkers,durationSec,tickMs,clientsHttp,clientsWs,sessionsCount,wsCount,httpCount,path' | Out-File -FilePath $indexCsv -Encoding utf8
   }
   if (-not (Test-Path $allCsv)) {
-    'timestampDir,label,mode,loadCpuPct,count,avgRate,avgBytesRate,avgPayload,avgJitterMs,avgFreshnessMs,avgDelayP99,avgCpu,avgRss,ci95Rate,ci95Bytes,tickMs,durationSec,clientsHttp,clientsWs' | Out-File -FilePath $allCsv -Encoding utf8
+  'timestampDir,label,mode,loadCpuPct,loadWorkers,count,avgRate,avgBytesRate,avgPayload,avgJitterMs,avgFreshnessMs,avgDelayP99,avgCpu,avgRss,ci95Rate,ci95Bytes,tickMs,durationSec,clientsHttp,clientsWs' | Out-File -FilePath $allCsv -Encoding utf8
   }
 
   foreach ($dur in $durations) {
     foreach ($tick in $ticks) {
-      foreach ($cHttp in $cHttpSet) {
-        foreach ($cWs in $cWsSet) {
-          for ($r = 1; $r -le [Math]::Max(1,$Repeats); $r++) {
-            Write-Host "[Matrix] Run: modes=$Modes; hz=$Hz; load=$Load; dur=${dur}s; tick=${tick}ms; cHttp=$cHttp; cWs=$cWs; rep=$r" -ForegroundColor Cyan
-            $args = @('--', '--modes', $Modes, '--hz', $Hz, '--load', $Load, '--dur', "$dur", '--tick', "$tick")
-            if ($cHttp -gt 0) { $args += @('--clientsHttp', "$cHttp") }
-            if ($cWs -gt 0)   { $args += @('--clientsWs',   "$cWs") }
+      foreach ($w in $wSet) {
+        foreach ($cHttp in $cHttpSet) {
+          foreach ($cWs in $cWsSet) {
+            for ($r = 1; $r -le [Math]::Max(1,$Repeats); $r++) {
+              Write-Host "[Matrix] Run: modes=$Modes; hz=$Hz; load=$Load; workers=$w; dur=${dur}s; tick=${tick}ms; cHttp=$cHttp; cWs=$cWs; rep=$r" -ForegroundColor Cyan
+              $args = @('--', '--modes', $Modes, '--hz', $Hz, '--load', $Load, '--dur', "$dur", '--tick', "$tick")
+              if ($cHttp -gt 0) { $args += @('--clientsHttp', "$cHttp") }
+              if ($cWs -gt 0)   { $args += @('--clientsWs',   "$cWs") }
+              $args += @('--warmup', "$Warmup", '--cooldown', "$Cooldown", '--workers', "$w")
 
-            & npm.cmd run measure --silent @args
-            if ($LASTEXITCODE -ne 0) { Write-Error "Runner zwrócił kod $LASTEXITCODE" }
+              # ustaw środowisko dla liczby workerów również przez ENV (na wszelki wypadek)
+              $prevWorkers = $env:MEASURE_LOAD_WORKERS
+              $env:MEASURE_LOAD_WORKERS = "$w"
+              & npm.cmd run measure --silent @args
+              $env:MEASURE_LOAD_WORKERS = $prevWorkers
+              if ($LASTEXITCODE -ne 0) { Write-Error "Runner zwrócił kod $LASTEXITCODE" }
 
-            # Zaktualizuj dokument badawczy po każdym przebiegu
-            & npm.cmd run docs:research:update --silent
+              # Zaktualizuj dokument badawczy po każdym przebiegu
+              & npm.cmd run docs:research:update --silent
 
-            # Pobierz najnowszy katalog z wynikami
-            $last = Get-ChildItem $benchRoot -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            if ($null -eq $last) { Write-Warning 'Brak katalogu wyników'; continue }
+              # Pobierz najnowszy katalog z wynikami
+              $last = Get-ChildItem $benchRoot -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+              if ($null -eq $last) { Write-Warning 'Brak katalogu wyników'; continue }
 
-            # Wczytaj summary.json
-            $summaryPath = Join-Path $last.FullName 'summary.json'
-            if (-not (Test-Path $summaryPath)) { Write-Warning "Brak summary.json w $($last.Name)"; continue }
-            $json = Get-Content -Raw -Path $summaryPath | ConvertFrom-Json
+              # Wczytaj summary.json
+              $summaryPath = Join-Path $last.FullName 'summary.json'
+              if (-not (Test-Path $summaryPath)) { Write-Warning "Brak summary.json w $($last.Name)"; continue }
+              $json = Get-Content -Raw -Path $summaryPath | ConvertFrom-Json
 
-            # Policz ws/http
-            $wsCount = ($json.summaries | Where-Object { $_.mode -eq 'ws' }).Count
-            $httpCount = ($json.summaries | Where-Object { $_.mode -eq 'polling' }).Count
-            $sessCount = ($json.summaries).Count
+              # Policz ws/http
+              $wsCount = ($json.summaries | Where-Object { $_.mode -eq 'ws' }).Count
+              $httpCount = ($json.summaries | Where-Object { $_.mode -eq 'polling' }).Count
+              $sessCount = ($json.summaries).Count
 
-            # Dopisz indeks
-            $line = @(
-              $last.Name,
-              '"' + $Modes + '"',
-              '"' + $Hz + '"',
-              '"' + $Load + '"',
-              $dur,
-              $tick,
-              $cHttp,
-              $cWs,
-              $sessCount,
-              $wsCount,
-              $httpCount,
-              '"' + $last.FullName + '"'
-            ) -join ','
-            Add-Content -Path $indexCsv -Value $line
-
-            # Dopisz wszystkie summaries do all_summaries.csv
-            foreach ($s in $json.summaries) {
-              $row = @(
+              # Dopisz indeks
+              $line = @(
                 $last.Name,
-                '"' + ($s.label -replace '"','''') + '"',
-                $s.mode,
-                [int]$s.loadCpuPct,
-                [int]$s.count,
-                [string]::Format('{0:F3}',[double]$s.avgRate),
-                [string]::Format('{0:F0}',[double]$s.avgBytesRate),
-                [string]::Format('{0:F0}',[double]$s.avgPayload),
-                [string]::Format('{0:F1}',[double]$s.avgJitterMs),
-                [string]::Format('{0:F0}',[double]$s.avgFreshnessMs),
-                [string]::Format('{0:F1}',[double]$s.avgDelayP99),
-                [string]::Format('{0:F1}',[double]$s.avgCpu),
-                [string]::Format('{0:F1}',[double]$s.avgRss),
-                [string]::Format('{0:F2}',[double]$s.ci95Rate),
-                [string]::Format('{0:F0}',[double]$s.ci95Bytes),
-                $tick,
+                '"' + $Modes + '"',
+                '"' + $Hz + '"',
+                '"' + $Load + '"',
+                $w,
                 $dur,
+                $tick,
                 $cHttp,
-                $cWs
+                $cWs,
+                $sessCount,
+                $wsCount,
+                $httpCount,
+                '"' + $last.FullName + '"'
               ) -join ','
-              Add-Content -Path $allCsv -Value $row
-            }
+              Add-Content -Path $indexCsv -Value $line
 
+              # Dopisz wszystkie summaries do all_summaries.csv
+              foreach ($s in $json.summaries) {
+                $row = @(
+                  $last.Name,
+                  '"' + ($s.label -replace '"','''') + '"',
+                  $s.mode,
+                  [int]$s.loadCpuPct,
+                  $w,
+                  [int]$s.count,
+                  [string]::Format('{0:F3}',[double]$s.avgRate),
+                  [string]::Format('{0:F0}',[double]$s.avgBytesRate),
+                  [string]::Format('{0:F0}',[double]$s.avgPayload),
+                  [string]::Format('{0:F1}',[double]$s.avgJitterMs),
+                  [string]::Format('{0:F0}',[double]$s.avgFreshnessMs),
+                  [string]::Format('{0:F1}',[double]$s.avgDelayP99),
+                  [string]::Format('{0:F1}',[double]$s.avgCpu),
+                  [string]::Format('{0:F1}',[double]$s.avgRss),
+                  [string]::Format('{0:F2}',[double]$s.ci95Rate),
+                  [string]::Format('{0:F0}',[double]$s.ci95Bytes),
+                  $tick,
+                  $dur,
+                  $cHttp,
+                  $cWs
+                ) -join ','
+                Add-Content -Path $allCsv -Value $row
+              }
+            }
           }
         }
       }

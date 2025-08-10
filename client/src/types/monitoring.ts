@@ -8,6 +8,9 @@ export interface LiveMetrics {
 	externalMB: number;
 	arrayBuffersMB: number;
 
+	/** Faktyczny odstęp między próbkami (monotonicznie) [ms] */
+	tickMs: number;
+
 	elu: number;
 	elDelayP50Ms: number;
 	elDelayP99Ms: number;

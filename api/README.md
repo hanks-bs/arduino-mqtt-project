@@ -326,12 +326,16 @@ This project includes a simple but reproducible measurement pipeline to compare 
 
 - Run a full measurement suite (creates artifacts under `benchmarks/<timestamp>/`):
   - `yarn measure`
+  - One-command full matrix: `npm run bench:main` (WS/HTTP; Hz: 0.5,1,2,5; load: 0,25,50; clients: 0,10,25,50; tick: 200 ms). After it finishes:
+    - docs auto-update the research file (`docs/ASPEKT_BADAWCZY.md`)
+    - all-runs aggregates are written to `benchmarks/_aggregate.csv` and `benchmarks/_aggregate.json` (also `benchmarks/combined.csv`)
 - Artifacts per run:
   - `sessions.csv` — flattened per‑second samples for both modes
   - `summary.json` — aggregated metrics (avg rates, bytes/unit, EL delay p99, jitter, freshness)
   - `README.md` — human‑readable summary mapped to the dashboard views
 - Update the research document (inject latest results into `docs/ASPEKT_BADAWCZY.md`):
   - `yarn docs:research:update`
+  - Open the consolidated results quickly: `npm run results:open`
 
 Notes:
 
@@ -339,6 +343,7 @@ Notes:
 - Intervals and tolerances are configurable in the measurement script (`src/scripts/measurementRunner.ts`).
 - Opcjonalny generator obciążenia CPU na czas sesji: `loadCpuPct` (0..100) i `loadWorkers` (1..8). W runnerze można też użyć env `MEASURE_LOAD_PCT`, `MEASURE_LOAD_WORKERS`.
 - Symulacja liczby klientów w sesji: `clientsHttp` (N równoległych wewnętrznych pollerów) oraz `clientsWs` (N syntetycznych klientów Socket.IO podłączonych do własnego serwera). Uwaga: `clientsWs` wymaga aby API było uruchomione i wystawiało Socket.IO pod `SELF_WS_URL` (domyślnie <http://localhost:5000>).
+  - Note: The Arduino sketch typically emits ~1 Hz. Rates >1–2 Hz test transport capacity and server load rather than data freshness. Use Staleness [ms] to interpret freshness.
 - W measurementRunner dostępne są dodatkowe flagi środowiskowe:
   - `MEASURE_LOAD_SET` np. `0,25,50` — uruchamia komplet przebiegów dla wielu poziomów obciążenia CPU,
   - `MEASURE_CLIENTS_HTTP` — liczba syntetycznych klientów HTTP,
