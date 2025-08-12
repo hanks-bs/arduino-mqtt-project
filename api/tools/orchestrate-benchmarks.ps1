@@ -43,6 +43,15 @@
 .PARAMETER Cooldown
   Czas odrzucany na końcu sesji (sekundy). Domyślnie 0.5.
 
+.PARAMETER Payload
+  Wspólny payload [B] dla WS/HTTP (jeśli nie podano specyficznych). Domyślnie 360.
+
+.PARAMETER PayloadWs
+  Payload [B] wymuszony dla WS. Nadpisuje Payload.
+
+.PARAMETER PayloadHttp
+  Payload [B] wymuszony dla HTTP. Nadpisuje Payload.
+
 .EXAMPLE
   pwsh -File ./api/tools/orchestrate-benchmarks.ps1 -Hz "1,2" -Load "0,25,50" -DurationSet "6" -TickSet "200" -ClientsHttpSet "0,10,25,50" -ClientsWsSet "0,10,25,50" -Repeats 1
 #>
@@ -60,7 +69,12 @@ param(
   [int]$Repeats = 3,
   [double]$Warmup = 2,
   [double]$Cooldown = 2,
-  [switch]$PairClients
+  [int]$CpuSampleMs = 1000,
+  [switch]$DisablePidusage,
+  [switch]$PairClients,
+  [int]$Payload = 360,
+  [Nullable[int]]$PayloadWs = $null,
+  [Nullable[int]]$PayloadHttp = $null
 )
 
 Set-StrictMode -Version Latest
@@ -98,6 +112,10 @@ try {
   foreach ($dur in $durations) {
     foreach ($tick in $ticks) {
       foreach ($w in $wSet) {
+  # Utwórz wspólny folder wyjściowy dla całej sesji (sticky)
+  $sessionStamp = (Get-Date).ToString('yyyy-MM-ddTHH-mm-ss-fffZ')
+  $stickyOut = Join-Path $benchRoot $sessionStamp
+  New-Item -ItemType Directory -Path $stickyOut -ErrorAction SilentlyContinue | Out-Null
         if ($PairClients) {
           # Iterate only matching pairs (cHttp == cWs); use intersection, fallback to union if empty
           $cPairs = @()
@@ -124,6 +142,11 @@ try {
                 MEASURE_COOLDOWN_SEC    = $env:MEASURE_COOLDOWN_SEC
                 MEASURE_REPEATS         = $env:MEASURE_REPEATS
                 MEASURE_LOAD_WORKERS    = $env:MEASURE_LOAD_WORKERS
+                MONITOR_CPU_SAMPLE_MS   = $env:MONITOR_CPU_SAMPLE_MS
+                MONITOR_DISABLE_PIDUSAGE= $env:MONITOR_DISABLE_PIDUSAGE
+                MEASURE_PAYLOAD         = $env:MEASURE_PAYLOAD
+                MEASURE_PAYLOAD_WS      = $env:MEASURE_PAYLOAD_WS
+                MEASURE_PAYLOAD_HTTP    = $env:MEASURE_PAYLOAD_HTTP
               }
               $env:MEASURE_MODES = $Modes
               $env:MEASURE_HZ_SET = $Hz
@@ -132,12 +155,31 @@ try {
               $env:MONITOR_TICK_MS = "$tick"
               $env:MEASURE_CLIENTS_HTTP = "$cHttp"
               $env:MEASURE_CLIENTS_WS = "$cWs"
+              # Ustaw też *_SET, aby runner potraktował je jako zestawy i poprawnie oznaczył etykiety cHttp=/cWs=
+              $env:MEASURE_CLIENTS_HTTP_SET = "$cHttp"
+              $env:MEASURE_CLIENTS_WS_SET = "$cWs"
               $env:MEASURE_WARMUP_SEC = "$Warmup"
               $env:MEASURE_COOLDOWN_SEC = "$Cooldown"
               $env:MEASURE_REPEATS = "$Repeats"
               $env:MEASURE_LOAD_WORKERS = "$w"
+              $env:MEASURE_OUTPUT_DIR = "benchmarks/$sessionStamp"
+              # Payloady
+              if ($PayloadWs -ne $null) {
+                $env:MEASURE_PAYLOAD_WS = "$PayloadWs"
+              } else {
+                $env:MEASURE_PAYLOAD_WS = "$Payload"
+              }
+              if ($PayloadHttp -ne $null) {
+                $env:MEASURE_PAYLOAD_HTTP = "$PayloadHttp"
+              } else {
+                $env:MEASURE_PAYLOAD_HTTP = "$Payload"
+              }
+              $env:MEASURE_PAYLOAD = "$Payload"
+              if ($CpuSampleMs -gt 0) { $env:MONITOR_CPU_SAMPLE_MS = "$CpuSampleMs" }
+              if ($DisablePidusage) { $env:MONITOR_DISABLE_PIDUSAGE = "1" } else { Remove-Item Env:MONITOR_DISABLE_PIDUSAGE -ErrorAction SilentlyContinue }
 
-              & npm.cmd run measure --silent
+              $env:MEASURE_PAIR = "1"
+              & npm.cmd run measure --silent -- --clientsHttp $cHttp --clientsWs $cWs
 
               # Przywróć ENV
               foreach ($k in $prevEnv.Keys) {
@@ -147,11 +189,12 @@ try {
                   Set-Item -Path ("Env:" + $k) -Value $prevEnv[$k]
                 }
               }
+              # Zachowaj znacznik katalogu w indexie (sticky)
               if ($LASTEXITCODE -ne 0) { Write-Error "Runner zwrócił kod $LASTEXITCODE" }
 
               & npm.cmd run docs:research:update --silent
 
-              $last = Get-ChildItem $benchRoot -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+              $last = Get-Item $stickyOut
               if ($null -eq $last) { Write-Warning 'Brak katalogu wyników'; continue }
               $summaryPath = Join-Path $last.FullName 'summary.json'
               if (-not (Test-Path $summaryPath)) { Write-Warning "Brak summary.json w $($last.Name)"; continue }
@@ -204,6 +247,10 @@ try {
           }
         }
         else {
+          # Utwórz wspólny folder wyjściowy dla całej sesji (sticky)
+          $sessionStamp = (Get-Date).ToString('yyyy-MM-ddTHH-mm-ss-fffZ')
+          $stickyOut = Join-Path $benchRoot $sessionStamp
+          New-Item -ItemType Directory -Path $stickyOut -ErrorAction SilentlyContinue | Out-Null
           foreach ($cHttp in $cHttpSet) {
             foreach ($cWs in $cWsSet) {
               Write-Host "[Matrix] Run: modes=$Modes; hz=$Hz; load=$Load; workers=$w; dur=${dur}s; tick=${tick}ms; cHttp=$cHttp; cWs=$cWs; repeats=$Repeats (runner)" -ForegroundColor Cyan
@@ -221,6 +268,11 @@ try {
                 MEASURE_COOLDOWN_SEC    = $env:MEASURE_COOLDOWN_SEC
                 MEASURE_REPEATS         = $env:MEASURE_REPEATS
                 MEASURE_LOAD_WORKERS    = $env:MEASURE_LOAD_WORKERS
+                MONITOR_CPU_SAMPLE_MS   = $env:MONITOR_CPU_SAMPLE_MS
+                MONITOR_DISABLE_PIDUSAGE= $env:MONITOR_DISABLE_PIDUSAGE
+                MEASURE_PAYLOAD         = $env:MEASURE_PAYLOAD
+                MEASURE_PAYLOAD_WS      = $env:MEASURE_PAYLOAD_WS
+                MEASURE_PAYLOAD_HTTP    = $env:MEASURE_PAYLOAD_HTTP
               }
               $env:MEASURE_MODES = $Modes
               $env:MEASURE_HZ_SET = $Hz
@@ -229,12 +281,30 @@ try {
               $env:MONITOR_TICK_MS = "$tick"
               $env:MEASURE_CLIENTS_HTTP = "$cHttp"
               $env:MEASURE_CLIENTS_WS = "$cWs"
+              # Ustaw też *_SET, aby runner potraktował je jako zestawy i poprawnie oznaczył etykiety cHttp=/cWs=
+              $env:MEASURE_CLIENTS_HTTP_SET = "$cHttp"
+              $env:MEASURE_CLIENTS_WS_SET = "$cWs"
               $env:MEASURE_WARMUP_SEC = "$Warmup"
               $env:MEASURE_COOLDOWN_SEC = "$Cooldown"
               $env:MEASURE_REPEATS = "$Repeats"
               $env:MEASURE_LOAD_WORKERS = "$w"
+              $env:MEASURE_OUTPUT_DIR = "benchmarks/$sessionStamp"
+              # Payloady
+              if ($PayloadWs -ne $null) {
+                $env:MEASURE_PAYLOAD_WS = "$PayloadWs"
+              } else {
+                $env:MEASURE_PAYLOAD_WS = "$Payload"
+              }
+              if ($PayloadHttp -ne $null) {
+                $env:MEASURE_PAYLOAD_HTTP = "$PayloadHttp"
+              } else {
+                $env:MEASURE_PAYLOAD_HTTP = "$Payload"
+              }
+              $env:MEASURE_PAYLOAD = "$Payload"
+              if ($CpuSampleMs -gt 0) { $env:MONITOR_CPU_SAMPLE_MS = "$CpuSampleMs" }
+              if ($DisablePidusage) { $env:MONITOR_DISABLE_PIDUSAGE = "1" } else { Remove-Item Env:MONITOR_DISABLE_PIDUSAGE -ErrorAction SilentlyContinue }
 
-              & npm.cmd run measure --silent
+              & npm.cmd run measure --silent -- --clientsHttp $cHttp --clientsWs $cWs
 
               # Przywróć ENV
               foreach ($k in $prevEnv.Keys) {
@@ -250,7 +320,7 @@ try {
               & npm.cmd run docs:research:update --silent
 
               # Pobierz najnowszy katalog z wynikami
-              $last = Get-ChildItem $benchRoot -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+              $last = Get-Item $stickyOut
               if ($null -eq $last) { Write-Warning 'Brak katalogu wyników'; continue }
 
               # Wczytaj summary.json

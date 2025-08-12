@@ -39,8 +39,9 @@ type RunCfg = {
 
 async function runWsControlled(cfg: RunCfg): Promise<SessionRecord> {
   const { label, hz, durationSec, payloadBytes, loadCpuPct, loadWorkers } = cfg;
-  // Approximate N WS clients by increasing total emission rate proportionally
-  const effHz = hz * Math.max(1, Math.floor(cfg.clientsWs ?? 1));
+  // WS emituje broadcast: Rate dotyczy liczby emisji (nie mnożymy przez liczbę klientów)
+  // Przepływność B/s będzie skalowana przez liczbę klientów w onWsEmit.
+  const effHz = hz;
   const rec = ResourceMonitor.startSession({
     label,
     mode: 'ws',
@@ -51,6 +52,8 @@ async function runWsControlled(cfg: RunCfg): Promise<SessionRecord> {
     cooldownSec: cfg.cooldownSec,
     loadCpuPct,
     loadWorkers,
+    // zapisz liczbę klientów WS do konfiguracji sesji (używane w agregacjach)
+    clientsWs: Math.max(0, Math.floor(cfg.clientsWs ?? 0)) || undefined,
     resetCounters: true,
   });
   // Wait for the duration + small buffer to ensure final tick
@@ -62,6 +65,14 @@ async function runWsControlled(cfg: RunCfg): Promise<SessionRecord> {
 async function runHttpSimulated(cfg: RunCfg): Promise<SessionRecord> {
   const { label, hz, durationSec, payloadBytes, loadCpuPct, loadWorkers } = cfg;
   const periodMs = Math.max(50, Math.round(1000 / Math.max(0.001, hz)));
+  // Upewnij się, że synthetic HTTP użyje żądanego payloadu (spójność z etykietą)
+  try { ResourceMonitor.noteArduinoPayloadSize(payloadBytes); } catch {}
+  // W trybie standalone nie ma działającego serwera HTTP, więc korzystamy z syntetycznych ticków.
+  // Jeśli liczba klientów nie została ustawiona (undefined), przyjmij 1, aby wymusić aktywność.
+  // Jeżeli użytkownik jawnie poda 0, zachowujemy 0 (brak aktywności dla parowania scenariuszy z WS=0).
+  const clients = (cfg.clientsHttp == null)
+    ? 1
+    : Math.max(0, Math.floor(cfg.clientsHttp));
   const rec = ResourceMonitor.startSession({
     label,
     mode: 'polling',
@@ -71,26 +82,13 @@ async function runHttpSimulated(cfg: RunCfg): Promise<SessionRecord> {
     cooldownSec: cfg.cooldownSec,
     loadCpuPct,
     loadWorkers,
-    clientsHttp: Math.max(1, Math.floor(cfg.clientsHttp ?? 1)),
+    // Włączamy syntetyczne żądania: domyślnie co najmniej 1 klient
+    clientsHttp: clients,
     internalHttpDriver: false,
     resetCounters: true,
   });
-  // Simulate N parallel HTTP clients by spawning N timers
-  const c = Math.max(1, Math.floor(cfg.clientsHttp ?? 1));
-  const timers: NodeJS.Timeout[] = [];
-  const doTick = () => {
-    try {
-      ResourceMonitor.onHttpResponse(payloadBytes);
-      ResourceMonitor.setLastArduinoTimestamp(new Date().toISOString());
-    } catch {}
-  };
-  for (let i = 0; i < c; i++) {
-    const t = setInterval(doTick, periodMs);
-    t.unref();
-    timers.push(t);
-  }
+  // Rely solely on ResourceMonitor's synthetic HTTP driver (started by startSession when internalHttpDriver=false and clientsHttp>0)
   await sleep(durationSec * 1000 + 600);
-  for (const t of timers) clearInterval(t);
   ResourceMonitor.finishSession(rec.id);
   return ResourceMonitor.getSession(rec.id)!;
 }
@@ -185,10 +183,19 @@ function summarizeSession(s: SessionRecord) {
   const stddev = (a: number[]) => Math.sqrt(variance(a, mean(a)));
   const rateStd = stddev(rateSeries);
   const bytesStd = stddev(bytesSeries);
-  const ci95Rate =
+  // Standard CI (z odchylenia próbki)
+  const ci95RateStd =
     1.96 * (rateSeries.length ? rateStd / Math.sqrt(rateSeries.length) : 0);
-  const ci95Bytes =
+  const ci95BytesStd =
     1.96 * (bytesSeries.length ? bytesStd / Math.sqrt(bytesSeries.length) : 0);
+  // Fallback Poissona dla rzadkich zdarzeń (stabilizuje CI przy bardzo małych średnich)
+  const eventsApprox = Math.max(0, Math.round(totalMsgsApprox));
+  const ci95RatePois =
+    dtSum > 0 ? 1.96 * Math.sqrt(Math.max(1, eventsApprox)) / dtSum : 0;
+  const ci95BytesPois = ci95RatePois * (avgPayload || 0);
+  const usePoisson = avgRate < 0.5 || eventsApprox < 30;
+  const ci95Rate = usePoisson ? ci95RatePois : ci95RateStd;
+  const ci95Bytes = usePoisson ? ci95BytesPois : ci95BytesStd;
   const median = (a: number[]) => {
     if (!a.length) return 0;
     const sorted = a.slice().sort((x, y) => x - y);
@@ -206,8 +213,49 @@ function summarizeSession(s: SessionRecord) {
       ? trimmed.reduce((x, y) => x + y, 0) / trimmed.length
       : mean(sorted);
   };
-  const rateMedian = median(rateSeries);
-  const bytesMedian = median(bytesSeries);
+  let rateMedian = median(rateSeries);
+  let bytesMedian = median(bytesSeries);
+  // Ulepszenie median: oblicz medianę z uśrednionych okien ~1 s, aby uniknąć 0 przy rzadkich zdarzeniach
+  try {
+    const makeWindowed = () => {
+      const wRates: number[] = [];
+      const wBytes: number[] = [];
+      let accTime = 0;
+      let accRate = 0;
+      let accBytes = 0;
+      for (const m of samples) {
+        const dt = Math.max(0.001, (m.tickMs || 0) / 1000);
+        const r = s.config.mode === 'polling' ? m.httpReqRate : m.wsMsgRate;
+        const b = s.config.mode === 'polling' ? m.httpBytesRate : m.wsBytesRate;
+        accTime += dt;
+        accRate += r * dt;
+        accBytes += b * dt;
+        if (accTime >= 1) {
+          const wR = accRate / accTime;
+          const wB = accBytes / accTime;
+          if (Number.isFinite(wR)) wRates.push(wR);
+          if (Number.isFinite(wB)) wBytes.push(wB);
+          accTime = 0;
+          accRate = 0;
+          accBytes = 0;
+        }
+      }
+      // dołóż resztę, jeśli znacząca (>= 0.5 s)
+      if (accTime >= 0.5) {
+        const wR = accRate / accTime;
+        const wB = accBytes / accTime;
+        if (Number.isFinite(wR)) wRates.push(wR);
+        if (Number.isFinite(wB)) wBytes.push(wB);
+      }
+      return { wRates, wBytes };
+    };
+    const { wRates, wBytes } = makeWindowed();
+    if (wRates.length >= 1) rateMedian = median(wRates);
+    if (wBytes.length >= 1) bytesMedian = median(wBytes);
+  } catch {}
+  // Fallbacki na przypadek rzadkich zdarzeń: jeśli mediana 0 przy średniej > 0, pokaż średnią
+  if (rateMedian === 0 && avgRate > 0) rateMedian = avgRate;
+  if (bytesMedian === 0 && avgBytesRate > 0) bytesMedian = avgBytesRate;
   const rateTrimmed = trimmedMean(rateSeries, 0.1);
   const bytesTrimmed = trimmedMean(bytesSeries, 0.1);
   const relCiRate = avgRate !== 0 ? ci95Rate / avgRate : 0;
@@ -215,6 +263,8 @@ function summarizeSession(s: SessionRecord) {
   return {
     id: s.id,
     label: s.config.label,
+  repIndex: (s as any).repIndex || 1,
+  repTotal: (s as any).repTotal || 1,
     mode: s.config.mode,
     clientsHttp: s.config.mode === 'polling' ? (s.config.clientsHttp ?? 0) : 0,
     clientsWs: s.config.mode === 'ws' ? (s.config.clientsWs ?? 0) : 0,
@@ -224,21 +274,22 @@ function summarizeSession(s: SessionRecord) {
     nTotal: s.samples.length,
     warmupSec: s.config.warmupSec || 0,
     cooldownSec: s.config.cooldownSec || 0,
-    avgCpu: sum.cpu / n,
-    avgRss: sum.rss / n,
+  // sanity clamp to avoid negative artifacts from sampler
+  avgCpu: Math.max(0, sum.cpu / n),
+  avgRss: Math.max(0, sum.rss / n),
     avgElu: sum.elu / n,
     avgDelayP99: sum.p99 / n,
     avgRate,
     rateMedian,
     rateTrimmed,
     rateStd,
-    ci95Rate,
+  ci95Rate,
     relCiRate,
     avgBytesRate,
     bytesMedian,
     bytesTrimmed,
     bytesStd,
-    ci95Bytes,
+  ci95Bytes,
     relCiBytes,
     avgPayload,
     bytesPerUnit,
@@ -331,11 +382,23 @@ function aggregateByClients(summaries: Summary[]) {
       fresh: number;
     }
   >();
+  const parseClientsFromLabel = (label: string, key: 'cWs' | 'cHttp') => {
+    const idx = label.indexOf(key + '=');
+    if (idx === -1) return 0;
+    const tail = label.slice(idx + key.length + 1);
+    const m = tail.match(/^(\d+)/);
+    return m ? Number(m[1]) : 0;
+  };
   for (const s of summaries) {
-    const clients =
+    const explicit =
       s.mode === 'ws'
-        ? ((s as any).clientsWs ?? 0)
-        : ((s as any).clientsHttp ?? 0);
+        ? Number((s as any).clientsWs ?? 0)
+        : Number((s as any).clientsHttp ?? 0);
+    const parsed =
+      s.mode === 'ws'
+        ? parseClientsFromLabel((s as any).label || s.label, 'cWs')
+        : parseClientsFromLabel((s as any).label || s.label, 'cHttp');
+    const clients = Number.isFinite(explicit) && explicit > 0 ? explicit : parsed;
     const key = `${s.mode}|${clients}`;
     const cur = acc.get(key) || {
       mode: s.mode,
@@ -464,28 +527,38 @@ function evaluate(summaries: ReturnType<typeof summarizeSession>[]) {
 
     const checks: string[] = [];
     const flags: { rateOk?: boolean; payloadOk?: boolean } = {};
-    // Scale expected rate by number of synthetic clients (if any)
+    // Skala oczekiwanej częstości:
+    // - HTTP: suma żądań ~ Hz × liczba klientów
+    // - WS: broadcast; emisja jest jedna niezależnie od liczby klientów
     let scaledExpectedRate: number | undefined = expectedRateBase;
     if (expectedRateBase != null) {
-      const clients =
-        s.mode === 'ws'
-          ? Math.max(1, Number((s as any).clientsWs ?? 1))
-          : Math.max(1, Number((s as any).clientsHttp ?? 1));
-      scaledExpectedRate = expectedRateBase * clients;
-      const low = scaledExpectedRate * (1 - tolRate);
-      const high = scaledExpectedRate * (1 + tolRate);
-      checks.push(
-        `rate=${s.avgRate.toFixed(2)} in [${low.toFixed(2)}, ${high.toFixed(2)}] (c=${clients})`,
-      );
-      flags.rateOk = s.avgRate >= low && s.avgRate <= high;
+      const clientsWs = Math.max(1, Number((s as any).clientsWs ?? 1));
+      const clientsHttp = Math.max(0, Number((s as any).clientsHttp ?? 0));
+      const clientsUsed = s.mode === 'polling' ? clientsHttp : 1;
+      if (clientsUsed > 0) {
+        scaledExpectedRate = expectedRateBase * clientsUsed;
+        const low = scaledExpectedRate * (1 - tolRate);
+        const high = scaledExpectedRate * (1 + tolRate);
+        checks.push(
+          `rate=${s.avgRate.toFixed(2)} in [${low.toFixed(2)}, ${high.toFixed(2)}] (c=${s.mode === 'polling' ? clientsHttp : clientsWs})`,
+        );
+        flags.rateOk = s.avgRate >= low && s.avgRate <= high;
+      } else {
+        // No clients for polling: do not set expectedRate to base to avoid misleading "1 Hz" in outputs
+        scaledExpectedRate = undefined;
+      }
     }
     if (expectedPayload != null) {
-      const low = expectedPayload * (1 - tolPayload);
-      const high = expectedPayload * (1 + tolPayload);
-      checks.push(
-        `bytesPerUnit=${s.bytesPerUnit.toFixed(1)} in [${low.toFixed(1)}, ${high.toFixed(1)}]`,
-      );
-      flags.payloadOk = s.bytesPerUnit >= low && s.bytesPerUnit <= high;
+      const clientsHttp0 = Math.max(0, Number((s as any).clientsHttp ?? 0)) === 0;
+      const noActivity = (s.avgRate || 0) === 0 || (s.mode === 'polling' && clientsHttp0);
+      if (!noActivity) {
+        const low = expectedPayload * (1 - tolPayload);
+        const high = expectedPayload * (1 + tolPayload);
+        checks.push(
+          `bytesPerUnit=${s.bytesPerUnit.toFixed(1)} in [${low.toFixed(1)}, ${high.toFixed(1)}]`,
+        );
+        flags.payloadOk = s.bytesPerUnit >= low && s.bytesPerUnit <= high;
+      }
     }
     return {
       ...s,
@@ -527,6 +600,15 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
   // Apply tick override before init
   if (opts.tickMs && Number.isFinite(opts.tickMs)) {
     (process.env as any).MONITOR_TICK_MS = String(opts.tickMs);
+  }
+  // Optional: disable or throttle pidusage sampling to reduce event-loop overhead on Windows
+  const disablePid = (opts as any).disablePidusage as boolean | undefined;
+  const cpuSampleMs = (opts as any).cpuSampleMs as number | undefined;
+  if (disablePid) {
+    (process.env as any).MONITOR_DISABLE_PIDUSAGE = '1';
+  }
+  if (cpuSampleMs && Number.isFinite(cpuSampleMs)) {
+    (process.env as any).MONITOR_CPU_SAMPLE_MS = String(cpuSampleMs);
   }
   // Init monitor
   ResourceMonitor.init(fakeIo as any);
@@ -697,6 +779,9 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
       console.log(
         `[Measure] Finished ${r.label} [rep ${i + 1}/${repeats}] (samples=${sess.samples.length})`,
       );
+  // Zachowaj metadane powtórzenia przy sesji, by trafiły do summary.json i raportu
+  (sess as any).repIndex = i + 1;
+  (sess as any).repTotal = repeats;
       sessions.push(sess);
       await sleep(300); // small separation between reps
     }
@@ -731,14 +816,31 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
   }
 
   // Output directory
+  const stickyOut = (process.env as any).MEASURE_OUTPUT_DIR as
+    | string
+    | undefined;
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const outDir = path.resolve(process.cwd(), 'benchmarks', ts);
+  const outDir = stickyOut
+    ? path.resolve(process.cwd(), stickyOut)
+    : path.resolve(process.cwd(), 'benchmarks', ts);
   await fs.mkdirp(outDir);
 
-  // Export CSV and JSON
+  // Export CSV and JSON (agregacja w jednym folderze, jeśli MEASURE_OUTPUT_DIR ustawione)
   const csvPath = path.join(outDir, 'sessions.csv');
   const summaryPath = path.join(outDir, 'summary.json');
-  exportCsv(sessions, csvPath);
+  // Append/Write sessions.csv
+  if (await fs.pathExists(csvPath)) {
+    // Append without header
+    const tmpCsv = path.join(outDir, `tmp_sessions_${Date.now()}.csv`);
+    exportCsv(sessions, tmpCsv);
+    const content = await fs.readFile(tmpCsv, 'utf8');
+    const lines = content.split(/\r?\n/);
+    const toAppend = lines.slice(1).join('\n');
+    await fs.appendFile(csvPath, '\n' + toAppend, 'utf8');
+    await fs.remove(tmpCsv);
+  } else {
+    exportCsv(sessions, csvPath);
+  }
   const runConfig = {
     modes: MODES,
     hzSet: HZ_SET,
@@ -754,12 +856,24 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
     repeats,
     pair: pairRuns,
   };
+  // Merge summary.json if exists
+  let combinedEvaluated = evaluated as any[];
+  if (await fs.pathExists(summaryPath)) {
+    try {
+      const prev = await fs.readJSON(summaryPath);
+      if (Array.isArray(prev?.summaries)) {
+        combinedEvaluated = [...prev.summaries, ...evaluated];
+      }
+    } catch {}
+  }
+  const combinedByLoad = aggregateByLoad(combinedEvaluated as any);
+  const combinedByClients = aggregateByClients(combinedEvaluated as any);
   await fs.writeJSON(
     summaryPath,
     {
-      summaries: evaluated,
-      byLoad,
-      byClients,
+      summaries: combinedEvaluated,
+      byLoad: combinedByLoad,
+      byClients: combinedByClients,
       flags,
       runConfig,
       units: {
@@ -826,15 +940,15 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
   // Generate README.md with documentation and preliminary evaluation
   const readmePath = path.join(outDir, 'README.md');
   const readme = renderReadme(
-    evaluated,
+    combinedEvaluated as any,
     {
       outDir,
       csvFile: 'sessions.csv',
       summaryFile: 'summary.json',
       durationSec,
     },
-    byLoad,
-    byClients,
+    combinedByLoad,
+    combinedByClients,
     runConfig,
   );
   await fs.writeFile(readmePath, readme, 'utf8');
@@ -875,6 +989,8 @@ if (require.main === module) {
   const payloadArg = get('payload');
   const payloadWsArg = get('payloadWs');
   const payloadHttpArg = get('payloadHttp');
+  const disablePidArg = argv.includes('--disablePidusage');
+  const cpuSampleArg = get('cpuSampleMs');
   const pairFlag = argv.includes('--pair');
 
   const cliOpts: MeasureOpts = {
@@ -919,6 +1035,10 @@ if (require.main === module) {
     payload: payloadArg ? Number(payloadArg) : undefined,
     payloadWs: payloadWsArg ? Number(payloadWsArg) : undefined,
     payloadHttp: payloadHttpArg ? Number(payloadHttpArg) : undefined,
+  // Extended flags (not documented in scripts):
+  // --disablePidusage (boolean), --cpuSampleMs <ms>
+  ...(disablePidArg ? { disablePidusage: true } : {}),
+  ...(cpuSampleArg ? { cpuSampleMs: Number(cpuSampleArg) } : {}),
     pair: pairFlag,
   };
 
@@ -955,13 +1075,66 @@ function renderReadme(
   },
 ) {
   const tsName = path.basename(opts.outDir);
-  // Sort rows for deterministic, readable order
   const parseHz = (label: string): number => {
     const m = label.match(/@(\d+(?:\.\d+)?)Hz/);
     return m ? Number(m[1]) : Number.NaN;
   };
   const getClients = (s: any): number =>
     s.mode === 'ws' ? Number(s.clientsWs ?? 0) : Number(s.clientsHttp ?? 0);
+  // Compute flags locally for readability
+  const fairPayload = runConfig.wsPayload === runConfig.httpPayload;
+  const ratios = evaluated
+    .map(s => {
+      const m = s.label.match(/@(\d+(?:\.\d+)?)Hz/);
+      const base = m ? Number(m[1]) : undefined;
+      const exp =
+        s.expectedRate ??
+        (Number.isFinite(base as any)
+          ? s.mode === 'polling'
+            ? (base as number) * Math.max(0, (s as any).clientsHttp ?? 0)
+            : (base as number)
+          : undefined);
+      return exp && exp > 0 ? s.avgRate / exp : Number.NaN;
+    })
+    .filter(r => Number.isFinite(r)) as number[];
+  const sourceLimited =
+    ratios.length > 0 &&
+    ratios.filter(r => r < 0.5).length / ratios.length >= 0.7;
+  // Discover distinct client sets from fields or fallback to label
+  const parseClientsFromLabel = (label: string, key: 'cWs' | 'cHttp') => {
+    const idx = label.indexOf(key + '=');
+    if (idx === -1) return 0;
+    const tail = label.slice(idx + key.length + 1);
+    const m = tail.match(/^(\d+)/);
+    return m ? Number(m[1]) : 0;
+  };
+  const wsClientsSet = Array.from(
+    new Set(
+      evaluated
+        .filter(s => s.mode === 'ws')
+        .map(s => {
+          const exp = Number((s as any).clientsWs ?? 0);
+          if (Number.isFinite(exp) && exp >= 0) return exp;
+          return parseClientsFromLabel((s as any).label || s.label, 'cWs');
+        }),
+    ),
+  )
+    .filter(n => Number.isFinite(n))
+    .sort((a, b) => a - b);
+  const httpClientsSet = Array.from(
+    new Set(
+      evaluated
+        .filter(s => s.mode === 'polling')
+        .map(s => {
+          const exp = Number((s as any).clientsHttp ?? 0);
+          if (Number.isFinite(exp) && exp >= 0) return exp;
+          return parseClientsFromLabel((s as any).label || s.label, 'cHttp');
+        }),
+    ),
+  )
+    .filter(n => Number.isFinite(n))
+    .sort((a, b) => a - b);
+
   const rows = evaluated
     .slice()
     .sort((a, b) => {
@@ -969,7 +1142,7 @@ function renderReadme(
       const ha = parseHz(a.label);
       const hb = parseHz(b.label);
       if (Number.isFinite(ha) && Number.isFinite(hb) && ha !== hb)
-        return ha - hb;
+        return (ha as number) - (hb as number);
       const la = Number((a as any).loadCpuPct ?? 0);
       const lb = Number((b as any).loadCpuPct ?? 0);
       if (la !== lb) return la - lb;
@@ -1038,7 +1211,8 @@ Przyjęte ustawienia tego runu:
  - Czas sesji [s]: ${runConfig.durationSec}
  - MONITOR_TICK_MS: ${runConfig.monitorTickMs} (okres próbkowania monitora; domyślnie 1000 ms w aplikacji, w badaniach zwykle 200–250 ms)
  - Payloady: WS=${runConfig.wsPayload}B, HTTP=${runConfig.httpPayload}B
- - Klienci: clientsHttp=${runConfig.clientsHttp}, clientsWs=${runConfig.clientsWs}
+ - Klienci WS (wykryte): [${wsClientsSet.join(', ')}]
+ - Klienci HTTP (wykryte): [${httpClientsSet.join(', ')}]
  - Warmup/Cooldown [s]: ${runConfig.warmupSec || 0} / ${runConfig.cooldownSec || 0}
 `;
 
@@ -1056,6 +1230,7 @@ Ten folder zawiera surowe próbki (CSV) oraz podsumowanie z wstępną oceną.
 ${table}
 
 Legenda: Rate OK / Payload OK — wstępna ocena względem oczekiwań (±50%).
+Scenariusze bez aktywności lub z clients=0 są oznaczane symbolem „—” (check pominięty).
 
 ## Jak czytać wyniki i powiązanie z dashboardem
 
@@ -1108,6 +1283,7 @@ ${evaluated.map(s => `- ${s.label}: ${s.checks.join('; ')}`).join('\n')}
 - Sesje są izolowane: resetCounters=true (liczniki) oraz reset rolling (jitter, EL delay, ELU baseline) na starcie.
 - Agregacja uwzględnia trimming warmup/cooldown (jeśli ustawione), co stabilizuje średnie.
 - Podajemy n (użyte/łącznie), 95% CI i tickMs, by pokazać niepewność estymacji i odstępy próbkowania.
+ - Flagi sesji: fairPayload=${fairPayload}, sourceLimited=${sourceLimited}
 `;
 }
 

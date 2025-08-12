@@ -34,19 +34,25 @@ async function main() {
   const exists = await fs.pathExists(benchesDir);
   if (!exists) throw new Error('Brak folderu benchmarków');
   const entries = await fs.readdir(benchesDir);
-  const dirs: string[] = [];
+  const candidates: Array<{ name: string; mtimeMs: number }> = [];
   for (const n of entries) {
+    if (n.startsWith('.') || n.startsWith('_')) continue; // pomiń pliki indeksów
     const p = path.join(benchesDir, n);
     try {
       const st = await fs.stat(p);
       if (!st.isDirectory()) continue;
-      if (!(await fs.pathExists(path.join(p, 'summary.json')))) continue;
-      dirs.push(n);
+      const hasSummary = await fs.pathExists(path.join(p, 'summary.json'));
+      if (!hasSummary) continue;
+      candidates.push({ name: n, mtimeMs: st.mtimeMs || st.mtime.getTime?.() || 0 });
     } catch {}
   }
-  if (!dirs.length) throw new Error('Brak plików summary.json');
-  dirs.sort((a, b) => (a > b ? -1 : 1));
-  const latest = dirs[0];
+  if (!candidates.length) throw new Error('Brak plików summary.json');
+  // Sortuj malejąco wg czasu modyfikacji katalogu; przy remisie fallback po nazwie
+  candidates.sort((a, b) => {
+    if (b.mtimeMs !== a.mtimeMs) return b.mtimeMs - a.mtimeMs;
+    return a.name > b.name ? -1 : 1;
+  });
+  const latest = candidates[0].name;
   const latestDir = path.join(benchesDir, latest);
   const sumPath = path.join(latestDir, 'summary.json');
   const summary = await fs.readJSON(sumPath);
@@ -128,7 +134,7 @@ async function main() {
   // helpers
   const parseIntSafe = (v: any): number | undefined => {
     const n = Number(v);
-    return Number.isFinite(n) && n > 0 ? n : undefined;
+    return Number.isFinite(n) && n >= 0 ? n : undefined;
   };
   const getClientsFromLabel = (
     label: string,
@@ -151,7 +157,8 @@ async function main() {
       s.mode === 'ws'
         ? getClientsFromLabel(s.label, 'cWs')
         : getClientsFromLabel(s.label, 'cHttp');
-    const clients = declaredClients ?? labelClients ?? 1;
+  // Default to 0 (not 1), to avoid fabricating activity when clients were explicitly 0
+  const clients = declaredClients ?? labelClients ?? 0;
     const expRate = s.expectedRate; // may already be scaled by clients (measurementRunner.evaluate)
     const expPayload = s.expectedPayload;
     // sample size
@@ -186,7 +193,9 @@ async function main() {
           if (Number.isFinite(hz) && hz > 0) expectedRateScaled = hz * clients;
         }
       }
-      if (expectedRateScaled != null) {
+      // Skip absolute rate expectation when no clients (HTTP) or no activity was expected
+      const skipRate = s.mode === 'polling' && clients === 0;
+      if (!skipRate && expectedRateScaled != null) {
         const low = expectedRateScaled * (1 - s.tolRate);
         const high = expectedRateScaled * (1 + s.tolRate);
         if (!(s.avgRate >= low && s.avgRate <= high)) {
@@ -197,12 +206,16 @@ async function main() {
       }
     }
     if (expPayload != null && s.tolPayload != null && s.bytesPerUnit != null) {
-      const low = expPayload * (1 - s.tolPayload);
-      const high = expPayload * (1 + s.tolPayload);
-      if (!(s.bytesPerUnit >= low && s.bytesPerUnit <= high)) {
-        fail.push(
-          `${s.label}: Bytes/jednostkę poza oczekiwaniem [${low.toFixed(1)}, ${high.toFixed(1)}], avg=${s.bytesPerUnit.toFixed(1)}`,
-        );
+      // Skip payload check when no activity (avgRate==0) or clients==0 for polling
+      const noActivity = s.avgRate === 0 || (s.mode === 'polling' && clients === 0);
+      if (!noActivity) {
+        const low = expPayload * (1 - s.tolPayload);
+        const high = expPayload * (1 + s.tolPayload);
+        if (!(s.bytesPerUnit >= low && s.bytesPerUnit <= high)) {
+          fail.push(
+            `${s.label}: Bytes/jednostkę poza oczekiwaniem [${low.toFixed(1)}, ${high.toFixed(1)}], avg=${s.bytesPerUnit.toFixed(1)}`,
+          );
+        }
       }
     }
   }

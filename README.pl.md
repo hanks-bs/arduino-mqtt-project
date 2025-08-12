@@ -195,10 +195,22 @@ Po stronie API dostępny jest kompletny mechanizm pomiarów, eksportu i aktualiz
 - Zaktualizuj dokument badawczy o ostatnie wyniki (sekcja auto w `docs/ASPEKT_BADAWCZY.md`):
   - `yarn docs:research:update` (z katalogu `api/`)
 
+Skróty pomiarowe (z katalogu `api/`):
+
+- `npm run research:quick` — krótki sanity check.
+- `npm run research:safe` — bezpieczny (0.5–1 Hz, tick=500 ms).
+- `npm run research:sanity` — stabilny sanity @1 Hz (12 s) z wyłączonym próbkowaniem CPU (`--disablePidusage`).
+- `npm run research:full` — pełny zestaw (Hz: 0.5,1,2; Load: 0,25,50; tick=200 ms).
+
+Uwagi (Windows PowerShell):
+
+- Unikaj składni `FOO=1 node ...` — w `pwsh` używaj flag runnera: `--disablePidusage` lub `--cpuSampleMs=1000`.
+
 Uwagi:
 
 - Aby ograniczyć szum, tymczasowo wyłącz emisje w czasie rzeczywistym: `LIVE_EMIT_ENABLED=0` lub `POST /api/monitor/live-emit` z `{ enabled:false }`.
 - Parametry i tolerancje możesz dostosować w `api/src/scripts/measurementRunner.ts`.
+  - Flagi runnera (przyjazne PowerShell): `--disablePidusage` (wyłącza próbnik CPU) oraz `--cpuSampleMs=1000` (przytłumia pobieranie próbek), jeśli chcesz przywrócić metrykę CPU bez zbyt dużego narzutu.
 
 ---
 

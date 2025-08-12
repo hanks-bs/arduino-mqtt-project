@@ -14,7 +14,7 @@ async function main() {
   if (!exists) throw new Error(`Brak folderu benchmarków: ${benchesDir}`);
 
   const entries = await fs.readdir(benchesDir);
-  const candidates: string[] = [];
+  const candidates: Array<{ name: string; mtimeMs: number }> = [];
   for (const n of entries) {
     if (n.startsWith('.') || n.startsWith('_')) continue; // pomiń pliki indeksów
     const p = path.join(benchesDir, n);
@@ -23,14 +23,17 @@ async function main() {
       if (!st.isDirectory()) continue;
       const hasSummary = await fs.pathExists(path.join(p, 'summary.json'));
       if (!hasSummary) continue;
-      candidates.push(n);
+      candidates.push({ name: n, mtimeMs: st.mtimeMs || st.mtime.getTime?.() || 0 });
     } catch {}
   }
   if (candidates.length === 0)
     throw new Error('Brak katalogów wyników w api/benchmarks');
-  // Nazwy mają postać ISO timestamp, sortowanie malejące po nazwie działa stabilnie
-  const sorted = candidates.sort((a, b) => (a > b ? -1 : 1));
-  const latest = sorted[0];
+  // Preferuj najnowszy po czasie modyfikacji; przy remisie fallback do sortowania nazwą malejąco
+  candidates.sort((a, b) => {
+    if (b.mtimeMs !== a.mtimeMs) return b.mtimeMs - a.mtimeMs;
+    return a.name > b.name ? -1 : 1;
+  });
+  const latest = candidates[0].name;
   const latestDir = path.join(benchesDir, latest);
   const summaryPath = path.join(latestDir, 'summary.json');
   const csvPath = path.join(latestDir, 'sessions.csv');
@@ -122,7 +125,8 @@ async function main() {
         s.payloadOk === undefined ? '—' : s.payloadOk ? '✅' : '❌';
       const nUsed = (s.nUsed ?? s.count) as number;
       const nTotal = (s.nTotal ?? s.count) as number;
-      return `| ${s.label} | ${s.mode} | ${s.avgRate.toFixed(2)} | ${s.avgBytesRate.toFixed(0)} | ${s.avgPayload.toFixed(0)} | ${s.avgJitterMs.toFixed(1)} | ${s.avgFreshnessMs.toFixed(0)} | ${s.avgDelayP99.toFixed(1)} | ${s.avgCpu.toFixed(1)} | ${s.avgRss.toFixed(1)} | ${nUsed}/${nTotal} | ${rateOk} | ${payloadOk} |`;
+  const rep = s.repIndex && s.repTotal ? ` [rep ${s.repIndex}/${s.repTotal}]` : '';
+  return `| ${s.label}${rep} | ${s.mode} | ${s.avgRate.toFixed(2)} | ${s.avgBytesRate.toFixed(0)} | ${s.avgPayload.toFixed(0)} | ${s.avgJitterMs.toFixed(1)} | ${s.avgFreshnessMs.toFixed(0)} | ${s.avgDelayP99.toFixed(1)} | ${s.avgCpu.toFixed(1)} | ${s.avgRss.toFixed(1)} | ${nUsed}/${nTotal} | ${rateOk} | ${payloadOk} |`;
     })
     .join('\n');
 
@@ -137,6 +141,8 @@ async function main() {
   const sourceNote = sourceLimited
     ? '\nUwaga: Etykiety @Hz odnoszą się do tempa transportu, ale run ograniczony przez źródło; różnice WS vs HTTP w Rate nie są miarodajne.'
     : '';
+  const clientsZeroNote =
+    '\nUwaga: Scenariusze z liczbą klientów = 0 mają różną semantykę: WS (push) emituje niezależnie od liczby klientów (mierzymy tempo emisji), natomiast HTTP (pull) przy 0 klientach nie generuje żądań → brak aktywności. Dlatego w porównaniach WS vs HTTP (\"Zwycięzcy\", tabele WS vs HTTP) takie wiersze są pomijane.';
   const block = `Ostatni run: ${latest}
 
 ${statusBar}
@@ -144,7 +150,7 @@ ${statusBar}
 Pliki: [sessions.csv](../api/benchmarks/${latest}/sessions.csv), [summary.json](../api/benchmarks/${latest}/summary.json), [README](../api/benchmarks/${latest}/README.md)
 
 Uwaga: tabele uporządkowane wg: Mode (WS, HTTP) → Hz → Obciążenie → Klienci.
-${isSafeRun ? '\nUwaga (SAFE): krótki przebieg 0.5–1 Hz bez obciążenia; walidacja odchyleń Rate oznaczana jako WARN (nie FAIL), by unikać fałszywych negatywów przy małym n.' : ''}${sourceNote}
+${isSafeRun ? '\nUwaga (SAFE): krótki przebieg 0.5–1 Hz bez obciążenia; walidacja odchyleń Rate oznaczana jako WARN (nie FAIL), by unikać fałszywych negatywów przy małym n.' : ''}${sourceNote}${clientsZeroNote}
 
 ${header}
 ${rows}
@@ -351,14 +357,17 @@ function renderByClientsSection(byClients: Array<any>): string {
 function renderConclusions(items: Array<any>): string {
   if (!items || items.length === 0) return '';
   const bullets = items
-    .map(
-      s =>
-        `- ${s.label}: ${s.checks?.join('; ') || ''} ${
-          s.warmupSec || 0 || s.cooldownSec || 0
-            ? `(trim: warmup=${s.warmupSec || 0}s, cooldown=${s.cooldownSec || 0}s)`
-            : ''
-        }`,
-    )
+    .map(s => {
+      const clients = s.mode === 'ws' ? Number(s.clientsWs ?? 0) : Number(s.clientsHttp ?? 0);
+      const active = Number(s.avgRate) > 0 || Number(s.avgBytesRate) > 0;
+      const na = !active || clients === 0 ? ' [N/A w porównaniach]' : '';
+  const rep = s.repIndex && s.repTotal ? ` [rep ${s.repIndex}/${s.repTotal}]` : '';
+      const trim = s.warmupSec || 0 || s.cooldownSec || 0
+        ? `(trim: warmup=${s.warmupSec || 0}s, cooldown=${s.cooldownSec || 0}s)`
+        : '';
+      const checks = s.checks?.join('; ') || '';
+  return `- ${s.label}${rep}: ${checks} ${trim}${na}`.trim();
+    })
     .join('\n');
   return `\n\n## Wnioski (syntetyczne)\n\n${bullets}\n`;
 }
@@ -389,6 +398,9 @@ function renderWinners(
     const load = Number(s.loadCpuPct ?? 0);
     const clients =
       s.mode === 'ws' ? Number(s.clientsWs ?? 0) : Number(s.clientsHttp ?? 0);
+  // Wyklucz scenariusze bez aktywności i z 0 klientami (różna semantyka metod)
+  const active = Number(s.avgRate) > 0 || Number(s.avgBytesRate) > 0;
+  if (!active || clients === 0) continue;
     const key = `Hz=${Number.isFinite(hz) ? hz : '—'}|Load=${load}|Clients=${clients}`;
     const arr = buckets.get(key) || [];
     arr.push(s);
@@ -423,8 +435,13 @@ function renderWinners(
   const intro =
     '\n\n## Zwycięzcy (per scenariusz)\n\nDla każdej kombinacji Hz/obciążenia/liczby klientów wskazano najlepszą metodę w kluczowych kategoriach.\n';
   // Dodaj też podsumowanie globalne per metoda
-  const wsAll = items.filter(s => s.mode === 'ws');
-  const httpAll = items.filter(s => s.mode === 'polling');
+  const eligible = items.filter(s => {
+    const clients = s.mode === 'ws' ? Number(s.clientsWs ?? 0) : Number(s.clientsHttp ?? 0);
+    const active = Number(s.avgRate) > 0 || Number(s.avgBytesRate) > 0;
+    return active && clients > 0;
+  });
+  const wsAll = eligible.filter(s => s.mode === 'ws');
+  const httpAll = eligible.filter(s => s.mode === 'polling');
   const avg = (a: number[]) =>
     a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
   const fmt = (n: number, f = 2) => (Number.isFinite(n) ? n.toFixed(f) : '—');
@@ -492,6 +509,10 @@ function renderWsHttpComparisonRows(
     const g = groups.get(k)!;
     const ws = g.ws;
     const http = g.http;
+  // Pomiń, jeśli brak pełnej pary albo brak aktywności po jednej ze stron
+  const wsActive = ws && (Number(ws.avgRate) > 0 || Number(ws.avgBytesRate) > 0);
+  const httpActive = http && (Number(http.avgRate) > 0 || Number(http.avgBytesRate) > 0);
+  if (!ws || !http || !wsActive || !httpActive) continue;
     const rateWs = Number(ws?.avgRate ?? NaN);
     const rateHttp = Number(http?.avgRate ?? NaN);
     const bRateWs = bestMark(rateWs, 'high', [rateHttp]);
@@ -562,8 +583,14 @@ function renderConclusionsVisual(
 
 function renderConclusionsSummary(items: Array<any>): string {
   if (!items || items.length === 0) return '';
+  // Tylko scenariusze aktywne i z klientami > 0 (porównywalne między metodami)
+  const eligible = items.filter(s => {
+    const clients = s.mode === 'ws' ? Number(s.clientsWs ?? 0) : Number(s.clientsHttp ?? 0);
+    const active = Number(s.avgRate) > 0 || Number(s.avgBytesRate) > 0;
+    return active && clients > 0;
+  });
   const modes: Record<string, any[]> = { ws: [], polling: [] };
-  for (const s of items) {
+  for (const s of eligible) {
     if (s.mode === 'ws') modes.ws.push(s);
     if (s.mode === 'polling') modes.polling.push(s);
   }

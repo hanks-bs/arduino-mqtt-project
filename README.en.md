@@ -188,6 +188,7 @@ The API provides a complete measurement pipeline, export, and auto‑update of t
 
 - Run the full measurement suite (artifacts under `api/benchmarks/<timestamp>/`):
   - `yarn measure` (from `api/`)
+  - Stable sanity: `npm run research:sanity` (WS+HTTP @1 Hz, 12 s, pidusage disabled)
 - Artifacts per run:
   - `sessions.csv` — flattened per‑second samples for WS and HTTP
   - `summary.json` — aggregates (averages, ELU p99, jitter, staleness)
@@ -199,6 +200,7 @@ Notes:
 
 - To reduce noise, temporarily disable real‑time emissions: `LIVE_EMIT_ENABLED=0` or `POST /api/monitor/live-emit` with `{ enabled:false }`.
 - You can tune parameters and tolerances in `api/src/scripts/measurementRunner.ts`.
+- Runner flags (PowerShell‑friendly): `--disablePidusage` to turn off CPU sampling; `--cpuSampleMs=1000` to throttle it.
 
 ---
 

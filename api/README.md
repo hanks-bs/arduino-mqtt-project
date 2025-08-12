@@ -328,6 +328,7 @@ This project includes a simple but reproducible measurement pipeline to compare 
   - `yarn measure` — direct access to the runner (advanced/manual flags)
   - Quick sanity: `npm run research:quick`
   - Safe low‑load: `npm run research:safe`
+  - Stable sanity (WS+HTTP @1 Hz, pidusage disabled): `npm run research:sanity`
   - Solid full run: `npm run research:full` (WS/HTTP; Hz: 0.5,1,2; load: 0,25,50; 30 s; warmup/cooldown 2 s; 2 repeats; tick 200 ms). After it finishes:
     - the research doc auto‑updates (`docs/ASPEKT_BADAWCZY.md`)
     - consolidated aggregates are written to `benchmarks/_aggregate.csv`/`_aggregate.json` and `benchmarks/combined.csv`
@@ -343,6 +344,22 @@ Notes:
 
 - To reduce noise during measurements, temporarily disable live emissions with `LIVE_EMIT_ENABLED=0` or via `POST /api/monitor/live-emit`.
 - Intervals and tolerances are configurable in the measurement script (`src/scripts/measurementRunner.ts`).
+- Runner CLI flags (for reliability and PowerShell compatibility):
+  - `--modes ws,polling` — wybór metod (przecinek rozdziela: `ws`, `polling`).
+  - `--hz 0.5,1,2` — zestaw częstotliwości.
+  - `--load 0,25,50` — zestaw obciążeń CPU (w %).
+  - `--dur 20` — czas trwania sesji (sekundy).
+  - `--tick 200` — MONITOR_TICK_MS (ms) dla pomiaru (precyzja próbkowania).
+  - `--clientsHttp 0,10,25` lub `--clientsHttp 10` — liczba klientów HTTP (pojedyncza lub CSV).
+  - `--clientsWs 0,10,25` lub `--clientsWs 10` — liczba klientów WS (pojedyncza lub CSV).
+  - `--payload 360` — wspólny payload [B] dla WS/HTTP (możesz rozdzielić: `--payloadWs 512`, `--payloadHttp 360`).
+  - `--warmup 2 --cooldown 2` — trimming próbek początkowych/końcowych (sek).
+  - `--repeats 2` — liczba powtórzeń per scenariusz.
+  - `--pair` — parowanie scenariuszy WS/HTTP po wspólnych wartościach klientów (fair porównanie).
+  - `--disablePidusage` — całkowite wyłączenie próbkowania CPU (eliminacja narzutu samplera).
+  - `--cpuSampleMs 1000` — throttling próbkowania CPU zamiast wyłączenia.
+  - Tip (PowerShell): flagi przekazuj po `--` przy `npm run measure` i unikaj `FOO=1 node ...` (nie działa w `pwsh`).
+- Auto‑doc updater selects the newest benchmark folder by modification time (mtime), not name order.
 - Opcjonalny generator obciążenia CPU na czas sesji: `loadCpuPct` (0..100) i `loadWorkers` (1..8). W runnerze można też użyć env `MEASURE_LOAD_PCT`, `MEASURE_LOAD_WORKERS`.
 - Symulacja liczby klientów w sesji: `clientsHttp` (N równoległych wewnętrznych pollerów) oraz `clientsWs` (N syntetycznych klientów Socket.IO podłączonych do własnego serwera). Uwaga: `clientsWs` wymaga aby API było uruchomione i wystawiało Socket.IO pod `SELF_WS_URL` (domyślnie <http://localhost:5000>).
   - Note: The Arduino sketch typically emits ~1 Hz. Rates >1–2 Hz test transport capacity and server load rather than data freshness. Use Staleness [ms] to interpret freshness.
@@ -350,6 +367,26 @@ Notes:
   - `MEASURE_LOAD_SET` np. `0,25,50` — uruchamia komplet przebiegów dla wielu poziomów obciążenia CPU,
   - `MEASURE_CLIENTS_HTTP` — liczba syntetycznych klientów HTTP,
   - `MEASURE_CLIENTS_WS` — liczba syntetycznych klientów WS.
+
+### Examples (PowerShell-friendly)
+
+Uruchomienie pojedynczego scenariusza (WS i HTTP), 60 s, @1 Hz, payloady: WS=512 B, HTTP=360 B, 2 powtórzenia, tick 200 ms, throttling CPU samplera:
+
+```powershell
+npm run -s measure -- --modes ws,polling --hz 1 --dur 60 --tick 200 --payloadWs 512 --payloadHttp 360 --repeats 2 --cpuSampleMs 1000
+```
+
+Macierz klientów z parowaniem (fair), @1 Hz, bez obciążenia, 60 s, tick 200 ms:
+
+```powershell
+pwsh -NoProfile -File .\tools\orchestrate-benchmarks.ps1 -Hz "1" -Load "0" -DurationSet "60" -TickSet "200" -ClientsHttpSet "0,10,25,50" -ClientsWsSet "0,10,25,50" -Repeats 2 -PairClients -Payload 360 -CpuSampleMs 1000
+```
+
+Podbicie obciążenia CPU i liczby wątków generatora na czas sesji:
+
+```powershell
+npm run -s measure -- --modes ws,polling --hz 1,2 --load 25,50 --workers 2 --dur 30 --tick 200 --payload 360 --repeats 2 --cpuSampleMs 1000
+```
 
 ---
 

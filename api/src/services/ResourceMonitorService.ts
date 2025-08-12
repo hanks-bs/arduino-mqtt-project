@@ -162,6 +162,16 @@ class ResourceMonitorService {
   private histogram = monitorEventLoopDelay({ resolution: 20 });
   private lastElu: ELU = performance.eventLoopUtilization();
   private monitorTickMs: number = 1000;
+  // Backpressure-aware sampler state
+  private tickRunning: boolean = false;
+  private stopped: boolean = false;
+
+  // pidusage throttling / caching
+  private lastPidSampleAtMs: number = 0;
+  private cpuSampleEveryMs: number = 1000; // default 1s
+  private pidDisabled: boolean = false;
+  private cachedCpuPct: number = 0;
+  private cachedRssBytes: number = 0;
 
   // sessions
   private sessions = new Map<string, SessionRecord>();
@@ -188,6 +198,8 @@ class ResourceMonitorService {
     process.env.SELF_WS_URL || 'http://localhost:5000';
   // multiple HTTP pollers
   private selfPollTimers: NodeJS.Timeout[] = [];
+  // synthetic HTTP pollers (no network)
+  private selfSyntheticHttpTimers: NodeJS.Timeout[] = [];
 
   /**
    * Must be called once after Socket.IO is ready.
@@ -211,14 +223,46 @@ class ResourceMonitorService {
       );
     } catch {}
 
+    // Configure pidusage sampling strategy
+    try {
+      const disable = (
+        process.env.MONITOR_DISABLE_PIDUSAGE ||
+        process.env.PIDUSAGE_DISABLED ||
+        '0'
+      )
+        .toString()
+        .toLowerCase();
+      this.pidDisabled = ['1', 'true', 'yes', 'on'].includes(disable);
+      const sampleMs = Number(
+        process.env.MONITOR_CPU_SAMPLE_MS || process.env.CPU_SAMPLE_MS || 1000,
+      );
+      if (Number.isFinite(sampleMs) && sampleMs > 0) this.cpuSampleEveryMs = sampleMs;
+    } catch {}
+
     if (!this.tickInterval) {
       // align monotonic baseline just before starting the loop
       try {
         this.lastTickMonoMs = performance.now();
       } catch {}
-      this.tickInterval = setInterval(() => this.tick(), this.monitorTickMs);
-      // do not keep the process alive solely because of this timer
-      this.tickInterval.unref();
+      // Use a backpressure-aware loop (no overlapping ticks)
+      const loop = async () => {
+        if (this.stopped) return;
+        if (!this.tickRunning) {
+          this.tickRunning = true;
+          try {
+            await this.tick();
+          } catch (e) {
+            console.error('ResourceMonitor tick error:', e);
+          } finally {
+            this.tickRunning = false;
+          }
+        }
+        this.tickInterval = setTimeout(loop, this.monitorTickMs) as any;
+        (this.tickInterval as any).unref?.();
+      };
+      // kick off
+      this.tickInterval = setTimeout(loop, this.monitorTickMs) as any;
+      (this.tickInterval as any).unref?.();
     }
   }
 
@@ -228,9 +272,10 @@ class ResourceMonitorService {
   shutdown() {
     try {
       if (this.tickInterval) {
-        clearInterval(this.tickInterval);
+        clearTimeout(this.tickInterval as any);
         this.tickInterval = null;
       }
+      this.stopped = true;
       try {
         this.histogram.disable();
       } catch {}
@@ -249,7 +294,7 @@ class ResourceMonitorService {
     this.totalHttpRequests += 1;
     this.totalHttpBytes += bytes;
     const now = Date.now();
-  this.lastIngestAtMs = now;
+    this.lastIngestAtMs = now;
     if (this.lastHttpResponseAt) {
       const delta = now - this.lastHttpResponseAt;
       if (delta >= 0) this.pushInterval(this.httpIntervals, delta);
@@ -263,9 +308,12 @@ class ResourceMonitorService {
    */
   onWsEmit(bytes: number) {
     this.totalWsMessages += 1;
-    this.totalWsBytes += bytes;
+    // Przepływność WS skalujemy przez liczbę podłączonych klientów (broadcast)
+    const clients = this.io ? this.io.of('/').sockets.size : 0;
+    const scale = Math.max(1, clients);
+    this.totalWsBytes += bytes * scale;
     const now = Date.now();
-  this.lastEmitAtMs = now;
+    this.lastEmitAtMs = now;
     if (this.lastWsMessageAt) {
       const delta = now - this.lastWsMessageAt;
       if (delta >= 0) this.pushInterval(this.wsIntervals, delta);
@@ -291,8 +339,8 @@ class ResourceMonitorService {
   /** Updates last Arduino timestamp for data freshness calculations. */
   setLastArduinoTimestamp(ts: string) {
     this.lastArduinoTimestamp = ts;
-  const t = Date.parse(ts);
-  if (!Number.isNaN(t)) this.lastArduinoTsMs = t;
+    const t = Date.parse(ts);
+    if (!Number.isNaN(t)) this.lastArduinoTsMs = t;
   }
 
   /** Inform the monitor about the last observed Arduino payload size (bytes). */
@@ -360,13 +408,23 @@ class ResourceMonitorService {
     this.sessions.set(id, rec);
     this.activeSessionId = id;
 
-    // start internal HTTP driver if needed
-  if (cfg.mode === 'polling' && (cfg.internalHttpDriver ?? true)) {
+    // start internal HTTP driver if needed; or synthetic driver if disabled but clients>0
+    if (cfg.mode === 'polling') {
       const every = cfg.pollingIntervalMs ?? 1000;
-      const clients = Math.max(1, Math.floor(cfg.clientsHttp ?? 1));
-      this.startSelfPolling(every, clients);
+      const clients = Math.max(0, Math.floor(cfg.clientsHttp ?? 0));
+      if (cfg.internalHttpDriver ?? true) {
+        const runClients = Math.max(1, clients || 1);
+        this.startSelfPolling(every, runClients);
+      } else if (clients > 0) {
+        // synthetic, in-process HTTP ticks to avoid network dependency in benchmarks
+        this.startSyntheticHttp(every, clients, this.lastArduinoPayloadBytes);
+      } else {
+        this.stopSelfPolling();
+        this.stopSyntheticHttp();
+      }
     } else {
       this.stopSelfPolling(); // ensure it's off
+      this.stopSyntheticHttp();
       // ensure WS emissions are enabled during a WS session
       if (this.prevLiveEmitBeforeSession === null) {
         this.prevLiveEmitBeforeSession = this.liveEmitEnabled;
@@ -513,16 +571,27 @@ class ResourceMonitorService {
     const nowMono = performance.now();
     const dtSec = Math.max(0.001, (nowMono - this.lastTickMonoMs) / 1000);
 
-    // pidusage can fail on some Windows setups; fall back gracefully
-    let usageCpu = 0;
-    let usageMem = 0;
-    try {
-      const u = await pidusage(process.pid);
-      usageCpu = (u as any).cpu ?? 0;
-      usageMem = (u as any).memory ?? 0;
-    } catch {
+    // pidusage can be expensive on Windows; throttle or disable if requested
+    let usageCpu = this.cachedCpuPct;
+    let usageMem = this.cachedRssBytes;
+    const needSample = nowWall - this.lastPidSampleAtMs >= this.cpuSampleEveryMs;
+    if (!this.pidDisabled && needSample) {
+      try {
+        const u = await pidusage(process.pid);
+        this.cachedCpuPct = usageCpu = (u as any).cpu ?? 0;
+        this.cachedRssBytes = usageMem = (u as any).memory ?? 0;
+        this.lastPidSampleAtMs = nowWall;
+      } catch {
+        const memNow = process.memoryUsage();
+        this.cachedRssBytes = usageMem = memNow.rss; // fallback to current RSS
+        this.cachedCpuPct = usageCpu = 0;
+        this.lastPidSampleAtMs = nowWall;
+      }
+    } else if (this.pidDisabled) {
+      // lightweight fallback
       const memNow = process.memoryUsage();
-      usageMem = memNow.rss; // fallback to current RSS
+      this.cachedRssBytes = usageMem = memNow.rss;
+      this.cachedCpuPct = usageCpu = 0;
     }
 
     // ELU delta
@@ -598,9 +667,9 @@ class ResourceMonitorService {
       httpJitterMs,
       wsJitterMs,
       dataFreshnessMs,
-  sourceTsMs: this.lastArduinoTsMs ?? undefined,
-  ingestTsMs: this.lastIngestAtMs ?? undefined,
-  emitTsMs: this.lastEmitAtMs ?? undefined,
+      sourceTsMs: this.lastArduinoTsMs ?? undefined,
+      ingestTsMs: this.lastIngestAtMs ?? undefined,
+      emitTsMs: this.lastEmitAtMs ?? undefined,
 
       totalHttpRequests: this.totalHttpRequests,
       totalWsMessages: this.totalWsMessages,
@@ -670,6 +739,34 @@ class ResourceMonitorService {
       } catch {}
     }
     this.selfPollTimers = [];
+  }
+
+  /** Starts synthetic in-process HTTP ticks to simulate polling clients deterministically. */
+  private startSyntheticHttp(intervalMs: number, count: number = 1, payloadBytes?: number) {
+    this.stopSyntheticHttp();
+    const every = Math.max(50, intervalMs);
+    const bytes = Math.max(1, Math.floor(payloadBytes || this.lastArduinoPayloadBytes));
+    const doOnce = () => {
+      try {
+        this.onHttpResponse(bytes);
+        this.setLastArduinoTimestamp(new Date().toISOString());
+      } catch {}
+    };
+    for (let i = 0; i < Math.max(1, count); i++) {
+      doOnce();
+      const t = setInterval(doOnce, every);
+      t.unref();
+      this.selfSyntheticHttpTimers.push(t);
+    }
+  }
+
+  private stopSyntheticHttp() {
+    for (const t of this.selfSyntheticHttpTimers) {
+      try {
+        clearInterval(t);
+      } catch {}
+    }
+    this.selfSyntheticHttpTimers = [];
   }
 
   /** Starts a controlled WS driver at fixed rate, incrementing WS counters fairly. */
@@ -819,9 +916,9 @@ class ResourceMonitorService {
     this.lastWsMessageAt = null;
     this.lastHttpResponseAt = null;
     this.lastArduinoTimestamp = null;
-  this.lastArduinoTsMs = null;
-  this.lastIngestAtMs = null;
-  this.lastEmitAtMs = null;
+    this.lastArduinoTsMs = null;
+    this.lastIngestAtMs = null;
+    this.lastEmitAtMs = null;
     // align delta baselines to current cumulative counters
     this.lastHttpRequests = this.totalHttpRequests;
     this.lastWsMessages = this.totalWsMessages;
