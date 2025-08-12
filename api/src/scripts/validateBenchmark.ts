@@ -65,6 +65,9 @@ async function main() {
     clientsWs: number;
     durationSec: number;
     monitorTickMs: number;
+    wsPayload: number;
+    httpPayload: number;
+    repeats: number;
   }>;
   const arr = (x: any): number[] =>
     Array.isArray(x) ? x : Number.isFinite(x) ? [Number(x)] : [];

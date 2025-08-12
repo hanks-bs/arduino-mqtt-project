@@ -72,6 +72,7 @@ async function main() {
         httpPayload: number;
         warmupSec: number;
         cooldownSec: number;
+        repeats?: number;
       };
   const byLoad: Array<any> = (summary.byLoad || []) as Array<any>;
   const byClients: Array<any> = (summary.byClients || []) as Array<any>;
@@ -306,9 +307,12 @@ function renderMetrology(items: Array<any>, tickMs?: number): string {
       const ciBytes = Number(s.ci95Bytes ?? 0);
       const rateStd = Number(s.rateStd ?? 0);
       const bytesStd = Number(s.bytesStd ?? 0);
-      const relCiRate = Number(s.relCiRate ?? (ciRate && s.avgRate ? ciRate / s.avgRate : 0));
+      const relCiRate = Number(
+        s.relCiRate ?? (ciRate && s.avgRate ? ciRate / s.avgRate : 0),
+      );
       const relCiBytes = Number(
-        s.relCiBytes ?? (ciBytes && s.avgBytesRate ? ciBytes / s.avgBytesRate : 0),
+        s.relCiBytes ??
+          (ciBytes && s.avgBytesRate ? ciBytes / s.avgBytesRate : 0),
       );
       return `| ${s.label} | ${nUsed}/${nTotal} | ${nf(s.avgRate, 2)} | ± ${nf(ciRate, 2)} | ${nf(relCiRate * 100, 0)}% | ${nf(rateStd, 2)} | ${nf(s.rateMedian, 2)} | ${nf(s.avgBytesRate, 0)} | ± ${nf(ciBytes, 0)} | ${nf(relCiBytes * 100, 0)}% | ${nf(bytesStd, 0)} | ${nf(s.bytesMedian, 0)} |`;
     })

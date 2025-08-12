@@ -519,7 +519,6 @@ type MeasureOpts = {
   repeats?: number; // number of repetitions per scenario (>=1)
   payload?: number; // shared payload for WS/HTTP
   payloadWs?: number; // WS-specific payload
-  payloadWs?: number; // WS-specific payload
   payloadHttp?: number; // HTTP-specific payload
   pair?: boolean; // pair WS/HTTP scenarios for the same parameters
 };
@@ -721,9 +720,14 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
   const sourceLimitedFlag =
     ratios.length > 0 &&
     ratios.filter(r => r < 0.5).length / ratios.length >= 0.7;
-  const flags = { fairPayload: fairPayloadFlag, sourceLimited: sourceLimitedFlag };
+  const flags = {
+    fairPayload: fairPayloadFlag,
+    sourceLimited: sourceLimitedFlag,
+  };
   if (!fairPayloadFlag) {
-    console.warn('[Measure] Uwaga: payload WS ≠ HTTP; porównania mogą być nie fair');
+    console.warn(
+      '[Measure] Uwaga: payload WS ≠ HTTP; porównania mogą być nie fair',
+    );
   }
 
   // Output directory
