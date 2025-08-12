@@ -189,6 +189,29 @@ function summarizeSession(s: SessionRecord) {
     1.96 * (rateSeries.length ? rateStd / Math.sqrt(rateSeries.length) : 0);
   const ci95Bytes =
     1.96 * (bytesSeries.length ? bytesStd / Math.sqrt(bytesSeries.length) : 0);
+  const median = (a: number[]) => {
+    if (!a.length) return 0;
+    const sorted = a.slice().sort((x, y) => x - y);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2
+      ? sorted[mid]
+      : (sorted[mid - 1] + sorted[mid]) / 2;
+  };
+  const trimmedMean = (a: number[], frac: number) => {
+    if (!a.length) return 0;
+    const sorted = a.slice().sort((x, y) => x - y);
+    const k = Math.floor(sorted.length * frac);
+    const trimmed = sorted.slice(k, sorted.length - k);
+    return trimmed.length
+      ? trimmed.reduce((x, y) => x + y, 0) / trimmed.length
+      : mean(sorted);
+  };
+  const rateMedian = median(rateSeries);
+  const bytesMedian = median(bytesSeries);
+  const rateTrimmed = trimmedMean(rateSeries, 0.1);
+  const bytesTrimmed = trimmedMean(bytesSeries, 0.1);
+  const relCiRate = avgRate !== 0 ? ci95Rate / avgRate : 0;
+  const relCiBytes = avgBytesRate !== 0 ? ci95Bytes / avgBytesRate : 0;
   return {
     id: s.id,
     label: s.config.label,
@@ -206,11 +229,17 @@ function summarizeSession(s: SessionRecord) {
     avgElu: sum.elu / n,
     avgDelayP99: sum.p99 / n,
     avgRate,
+    rateMedian,
+    rateTrimmed,
     rateStd,
     ci95Rate,
+    relCiRate,
     avgBytesRate,
+    bytesMedian,
+    bytesTrimmed,
     bytesStd,
     ci95Bytes,
+    relCiBytes,
     avgPayload,
     bytesPerUnit,
     avgJitterMs: sum.jitter / n,
@@ -466,6 +495,10 @@ function evaluate(summaries: ReturnType<typeof summarizeSession>[]) {
       expectedPayload,
       tolRate,
       tolPayload,
+      achievedRel:
+        scaledExpectedRate && scaledExpectedRate > 0
+          ? s.avgRate / scaledExpectedRate
+          : undefined,
     } as const;
   });
 }
@@ -484,6 +517,10 @@ type MeasureOpts = {
   warmupSec?: number;
   cooldownSec?: number;
   repeats?: number; // number of repetitions per scenario (>=1)
+  payload?: number; // wspólny payload dla WS/HTTP
+  payloadWs?: number; // payload specyficzny dla WS
+  payloadHttp?: number; // payload specyficzny dla HTTP
+  pair?: boolean; // paruj scenariusze WS/HTTP dla tych samych parametrów
 };
 
 export async function runMeasurements(opts: MeasureOpts = {}) {
@@ -499,8 +536,15 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
   const durationSec = Number(
     opts.durationSec ?? process.env.MEASURE_DURATION_SEC ?? '6',
   );
-  const wsPayload = 360;
-  const httpPayload = 420;
+  const basePayload = Number(
+    opts.payload ?? process.env.MEASURE_PAYLOAD ?? '360',
+  );
+  const wsPayload = Number(
+    opts.payloadWs ?? process.env.MEASURE_PAYLOAD_WS ?? basePayload,
+  );
+  const httpPayload = Number(
+    opts.payloadHttp ?? process.env.MEASURE_PAYLOAD_HTTP ?? basePayload,
+  );
   const warmupSec = Number(
     opts.warmupSec ?? process.env.MEASURE_WARMUP_SEC ?? '0',
   );
@@ -545,6 +589,9 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
           .map(s => Number(s.trim()))
           .filter(n => Number.isFinite(n))
   ).map(n => Math.max(0, Math.floor(n)));
+  const pairRuns = Boolean(
+    opts.pair ?? Number(process.env.MEASURE_PAIR || '0'),
+  );
   const runs: RunCfg[] = [];
   // Filter by modes (e.g., MEASURE_MODES="ws,polling") and HZ set (e.g., "1,2")
   const MODES = (
@@ -559,43 +606,79 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
   ).filter(n => Number.isFinite(n) && n > 0);
   for (const lp of loadLevels) {
     const loadLabel = lp ? ` + load=${lp}%` : '';
-    // WS
-    if (MODES.includes('ws')) {
-      const wsClientsList = CW_SET.length ? CW_SET : [CLIENTS_WS_SINGLE];
+    const wsClientsList = CW_SET.length ? CW_SET : [CLIENTS_WS_SINGLE];
+    const httpClientsList = CH_SET.length ? CH_SET : [CLIENTS_HTTP_SINGLE];
+    if (pairRuns) {
       for (const hz of HZ_SET) {
-        for (const cWs of wsClientsList) {
-          runs.push({
-            label: `WS@${hz}Hz payload=360B${loadLabel}${cWs ? ` cWs=${cWs}` : ''}`,
-            mode: 'ws',
-            hz,
-            durationSec,
-            payloadBytes: wsPayload,
-            loadCpuPct: lp || undefined,
-            loadWorkers: lp ? CLI_WORKERS : undefined,
-            clientsWs: cWs || undefined,
-            warmupSec: warmupSec || undefined,
-            cooldownSec: cooldownSec || undefined,
-          });
+        const clientUnion = Array.from(
+          new Set([...wsClientsList, ...httpClientsList]),
+        );
+        for (const c of clientUnion) {
+          if (MODES.includes('ws') && wsClientsList.includes(c)) {
+            runs.push({
+              label: `WS@${hz}Hz payload=${wsPayload}B${loadLabel}${c ? ` cWs=${c}` : ''}`,
+              mode: 'ws',
+              hz,
+              durationSec,
+              payloadBytes: wsPayload,
+              loadCpuPct: lp || undefined,
+              loadWorkers: lp ? CLI_WORKERS : undefined,
+              clientsWs: c || undefined,
+              warmupSec: warmupSec || undefined,
+              cooldownSec: cooldownSec || undefined,
+            });
+          }
+          if (MODES.includes('polling') && httpClientsList.includes(c)) {
+            runs.push({
+              label: `HTTP@${hz}Hz payload=${httpPayload}B${loadLabel}${c ? ` cHttp=${c}` : ''}`,
+              mode: 'polling',
+              hz,
+              durationSec,
+              payloadBytes: httpPayload,
+              loadCpuPct: lp || undefined,
+              loadWorkers: lp ? CLI_WORKERS : undefined,
+              clientsHttp: c || undefined,
+              warmupSec: warmupSec || undefined,
+              cooldownSec: cooldownSec || undefined,
+            });
+          }
         }
       }
-    }
-    // HTTP
-    if (MODES.includes('polling')) {
-      const httpClientsList = CH_SET.length ? CH_SET : [CLIENTS_HTTP_SINGLE];
-      for (const hz of HZ_SET) {
-        for (const cHttp of httpClientsList) {
-          runs.push({
-            label: `HTTP@${hz}Hz payload=420B${loadLabel}${cHttp ? ` cHttp=${cHttp}` : ''}`,
-            mode: 'polling',
-            hz,
-            durationSec,
-            payloadBytes: httpPayload,
-            loadCpuPct: lp || undefined,
-            loadWorkers: lp ? CLI_WORKERS : undefined,
-            clientsHttp: cHttp || undefined,
-            warmupSec: warmupSec || undefined,
-            cooldownSec: cooldownSec || undefined,
-          });
+    } else {
+      if (MODES.includes('ws')) {
+        for (const hz of HZ_SET) {
+          for (const cWs of wsClientsList) {
+            runs.push({
+              label: `WS@${hz}Hz payload=${wsPayload}B${loadLabel}${cWs ? ` cWs=${cWs}` : ''}`,
+              mode: 'ws',
+              hz,
+              durationSec,
+              payloadBytes: wsPayload,
+              loadCpuPct: lp || undefined,
+              loadWorkers: lp ? CLI_WORKERS : undefined,
+              clientsWs: cWs || undefined,
+              warmupSec: warmupSec || undefined,
+              cooldownSec: cooldownSec || undefined,
+            });
+          }
+        }
+      }
+      if (MODES.includes('polling')) {
+        for (const hz of HZ_SET) {
+          for (const cHttp of httpClientsList) {
+            runs.push({
+              label: `HTTP@${hz}Hz payload=${httpPayload}B${loadLabel}${cHttp ? ` cHttp=${cHttp}` : ''}`,
+              mode: 'polling',
+              hz,
+              durationSec,
+              payloadBytes: httpPayload,
+              loadCpuPct: lp || undefined,
+              loadWorkers: lp ? CLI_WORKERS : undefined,
+              clientsHttp: cHttp || undefined,
+              warmupSec: warmupSec || undefined,
+              cooldownSec: cooldownSec || undefined,
+            });
+          }
         }
       }
     }
@@ -626,6 +709,22 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
   const byLoad = aggregateByLoad(evaluated as any);
   const byClients = aggregateByClients(evaluated as any);
 
+  const fairPayloadFlag = wsPayload === httpPayload;
+  const ratios = evaluated
+    .map(s =>
+      s.expectedRate && s.expectedRate > 0
+        ? s.avgRate / s.expectedRate
+        : Number.NaN,
+    )
+    .filter(r => Number.isFinite(r)) as number[];
+  const sourceLimitedFlag =
+    ratios.length > 0 &&
+    ratios.filter(r => r < 0.5).length / ratios.length >= 0.7;
+  const flags = { fairPayload: fairPayloadFlag, sourceLimited: sourceLimitedFlag };
+  if (!fairPayloadFlag) {
+    console.warn('[Measure] Uwaga: payload WS ≠ HTTP; porównania mogą być nie fair');
+  }
+
   // Output directory
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const outDir = path.resolve(process.cwd(), 'benchmarks', ts);
@@ -647,6 +746,8 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
     httpPayload,
     warmupSec,
     cooldownSec,
+    repeats,
+    pair: pairRuns,
   };
   await fs.writeJSON(
     summaryPath,
@@ -654,6 +755,7 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
       summaries: evaluated,
       byLoad,
       byClients,
+      flags,
       runConfig,
       units: {
         rate: '/s',
@@ -742,7 +844,7 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
 
   // Clean up timers/workers to avoid leaks in tests/CI
   ResourceMonitor.shutdown();
-  return { outDir, evaluated } as const;
+  return { outDir, evaluated, flags } as const;
 }
 // Execute as CLI when run directly
 if (require.main === module) {
@@ -765,6 +867,10 @@ if (require.main === module) {
   const coolArg = get('cooldown');
   const workersArg = get('workers');
   const repeatsArg = get('repeats');
+  const payloadArg = get('payload');
+  const payloadWsArg = get('payloadWs');
+  const payloadHttpArg = get('payloadHttp');
+  const pairFlag = argv.includes('--pair');
 
   const cliOpts: MeasureOpts = {
     modes: modesArg
@@ -805,6 +911,10 @@ if (require.main === module) {
     warmupSec: warmArg ? Number(warmArg) : undefined,
     cooldownSec: coolArg ? Number(coolArg) : undefined,
     repeats: repeatsArg ? Number(repeatsArg) : undefined,
+    payload: payloadArg ? Number(payloadArg) : undefined,
+    payloadWs: payloadWsArg ? Number(payloadWsArg) : undefined,
+    payloadHttp: payloadHttpArg ? Number(payloadHttpArg) : undefined,
+    pair: pairFlag,
   };
 
   runMeasurements(cliOpts)
