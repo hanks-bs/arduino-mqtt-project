@@ -519,7 +519,8 @@ type MeasureOpts = {
   repeats?: number; // number of repetitions per scenario (>=1)
   payload?: number; // shared payload for WS/HTTP
   payloadWs?: number; // WS-specific payload
-  payloadHttp?: number; // payload specyficzny dla HTTP
+  payloadWs?: number; // WS-specific payload
+  payloadHttp?: number; // HTTP-specific payload
   pair?: boolean; // paruj scenariusze WS/HTTP dla tych samych parametrów
 };
 
