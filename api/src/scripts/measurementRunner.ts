@@ -518,7 +518,7 @@ type MeasureOpts = {
   cooldownSec?: number;
   repeats?: number; // number of repetitions per scenario (>=1)
   payload?: number; // wspólny payload dla WS/HTTP
-  payloadWs?: number; // payload specyficzny dla WS
+  payloadWs?: number; // WS-specific payload
   payloadHttp?: number; // payload specyficzny dla HTTP
   pair?: boolean; // paruj scenariusze WS/HTTP dla tych samych parametrów
 };
