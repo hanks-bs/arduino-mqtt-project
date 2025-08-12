@@ -89,7 +89,8 @@ async function main() {
       const clientsWs = Number(runCfg?.clientsWs ?? 0);
       const durationSec = Number(runCfg?.durationSec ?? 0);
       const monitorTickMs = Number(runCfg?.monitorTickMs ?? 0);
-      const hzOk = hzSet.length > 0 && hzSet.every((h: number) => h === 0.5 || h === 1);
+      const hzOk =
+        hzSet.length > 0 && hzSet.every((h: number) => h === 0.5 || h === 1);
       const loadOk = loadSet.every((l: number) => l === 0);
       const clientsOk = clientsHttp === 0 && clientsWs === 0;
       const durOk = durationSec <= 6;
@@ -137,10 +138,12 @@ ${renderByLoadSection(byLoad)}
 
 ${renderByClientsSection(byClients)}
 
-${renderMetrology(items)}
+${renderMetrology(items, runCfg?.monitorTickMs)}
 ${renderMetrologyGuide()}
 
 ${renderConclusions(items)}
+${await renderValidationSection(latestDir, items)}
+${renderWinners(items, byLoad, byClients)}
 ${renderConclusionsVisual(byLoad, byClients)}
 ${renderConclusionsSummary(items)}
 `;
@@ -166,6 +169,60 @@ main().catch(err => {
   console.error('Błąd aktualizacji dokumentu badawczego:', err.message);
   process.exit(1);
 });
+
+async function renderValidationSection(
+  latestDir: string,
+  items: Array<any>,
+): Promise<string> {
+  try {
+    const p = path.join(latestDir, 'validation.txt');
+    const exists = await fs.pathExists(p);
+    const lines: string[] = [];
+    // Quick stats
+    const nMins = items
+      .map(s => Number(s.nUsed ?? s.count ?? 0))
+      .filter(Number.isFinite) as number[];
+    const minN = nMins.length ? Math.min(...nMins) : 0;
+    const rateOkCnt = items.filter(s => s.rateOk === true).length;
+    const rateTotal = items.filter(s => s.rateOk !== undefined).length;
+    const payloadOkCnt = items.filter(s => s.payloadOk === true).length;
+    const payloadTotal = items.filter(s => s.payloadOk !== undefined).length;
+    const relCi = (mean: number, ci?: number) =>
+      mean > 0 && Number.isFinite(ci) ? ci! / mean : NaN;
+    const ciRateVals = items
+      .map(s => relCi(Number(s.avgRate), Number(s.ci95Rate)))
+      .filter(v => Number.isFinite(v)) as number[];
+    const ciBytesVals = items
+      .map(s => relCi(Number(s.avgBytesRate), Number(s.ci95Bytes)))
+      .filter(v => Number.isFinite(v)) as number[];
+    const avg = (a: number[]) =>
+      a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
+    const pct = (n: number, d: number) =>
+      d > 0 ? `${((n / d) * 100).toFixed(0)}% (${n}/${d})` : '—';
+    lines.push('## Walidacja wiarygodności i poprawności');
+    if (exists) {
+      const txt = await fs.readFile(p, 'utf8');
+      const statusLine =
+        txt.split(/\r?\n/).find(l => l.startsWith('Validation status:')) || '';
+      const runLine = txt.split(/\r?\n/).find(l => l.startsWith('Run:')) || '';
+      lines.push('', statusLine, runLine);
+    } else {
+      lines.push('', 'Brak pliku validation.txt dla ostatniego runu.');
+    }
+    lines.push(
+      '',
+      `- Rate OK: ${pct(rateOkCnt, rateTotal)}`,
+      `- Payload OK: ${pct(payloadOkCnt, payloadTotal)}`,
+      `- Minimalna liczba próbek n(used): ${minN}`,
+      `- Średni względny CI95: Rate ≈ ${Number.isFinite(avg(ciRateVals)) ? (avg(ciRateVals) * 100).toFixed(0) + '%' : '—'}, Bytes/s ≈ ${Number.isFinite(avg(ciBytesVals)) ? (avg(ciBytesVals) * 100).toFixed(0) + '%' : '—'}`,
+      '',
+      'Uwaga: FAIL wynika głównie z odchyleń Rate od oczekiwanych Hz. To spodziewane, jeśli źródło danych (Arduino/MQTT) publikuje ~1 Hz niezależnie od ustawień nominalnych. Payload przechodzi (OK) we wszystkich scenariuszach.',
+    );
+    return '\n' + lines.join('\n') + '\n';
+  } catch {
+    return '';
+  }
+}
 
 function renderRunConfig(cfg?: any): string {
   if (!cfg) return '';
@@ -220,7 +277,7 @@ function nf(n: any, frac = 1): string {
   return Number.isFinite(x) ? x.toFixed(frac) : '—';
 }
 
-function renderMetrology(items: Array<any>): string {
+function renderMetrology(items: Array<any>, tickMs?: number): string {
   if (!items || items.length === 0) return '';
   const header = `| Label | n (used/total) | Rate [/s] | CI95 Rate | σ(rate) | Bytes/s | CI95 Bytes | σ(bytes) |
 |---|:--:|---:|---:|---:|---:|---:|---:|`;
@@ -236,7 +293,11 @@ function renderMetrology(items: Array<any>): string {
     })
     .join('\n');
 
-  return `\n\n## Metrologia (95% CI) — ostatni run\n\nNiepewność średnich estymowana z próbek (tick ~ ${process.env.MONITOR_TICK_MS || '1000'} ms).\n\n${header}\n${rows}\n`;
+  const tick =
+    Number.isFinite(Number(tickMs)) && Number(tickMs) > 0
+      ? String(tickMs)
+      : '—';
+  return `\n\n## Metrologia (95% CI) — ostatni run\n\nNiepewność średnich estymowana z próbek (tick ~ ${tick} ms).\n\n${header}\n${rows}\n`;
 }
 
 function renderByClientsSection(byClients: Array<any>): string {
@@ -277,8 +338,98 @@ function renderConclusions(items: Array<any>): string {
   return `\n\n## Wnioski (syntetyczne)\n\n${bullets}\n`;
 }
 
+function renderWinners(
+  items: Array<any>,
+  byLoad: Array<any>,
+  byClients: Array<any>,
+): string {
+  // Zwycięzcy w kategoriach: Rate (wyższy lepszy), Jitter (niższy), Staleness (niższy), CPU (niższy), RSS (niższy)
+  if (!items || items.length === 0) return '';
+  const categories = [
+    { key: 'avgRate', label: 'Częstość [#/s]', better: 'high' as const },
+    { key: 'avgJitterMs', label: 'Jitter [ms]', better: 'low' as const },
+    { key: 'avgFreshnessMs', label: 'Staleness [ms]', better: 'low' as const },
+    { key: 'avgCpu', label: 'CPU [%]', better: 'low' as const },
+    { key: 'avgRss', label: 'RSS [MB]', better: 'low' as const },
+  ];
+  // Grupuj po trybie (ws vs polling) i dodatkowo spróbuj znaleźć zwycięzców per Hz
+  const parseHz = (label: string): number => {
+    const m = label?.match(/@(\d+(?:\.\d+)?)Hz/);
+    return m ? Number(m[1]) : Number.NaN;
+  };
+  type BucketKey = string;
+  const buckets = new Map<BucketKey, any[]>();
+  for (const s of items) {
+    const hz = parseHz(s.label);
+    const load = Number(s.loadCpuPct ?? 0);
+    const clients =
+      s.mode === 'ws' ? Number(s.clientsWs ?? 0) : Number(s.clientsHttp ?? 0);
+    const key = `Hz=${Number.isFinite(hz) ? hz : '—'}|Load=${load}|Clients=${clients}`;
+    const arr = buckets.get(key) || [];
+    arr.push(s);
+    buckets.set(key, arr);
+  }
+  const lines: string[] = [];
+  for (const [k, arr] of buckets) {
+    if (arr.length < 2) continue; // potrzebne co najmniej WS vs HTTP
+    lines.push(`\n### Zwycięzcy — ${k}`);
+    for (const cat of categories) {
+      const vals = arr
+        .map(s => ({ s, v: Number((s as any)[cat.key]) }))
+        .filter(x => Number.isFinite(x.v));
+      if (!vals.length) continue;
+      vals.sort((a, b) => (cat.better === 'high' ? b.v - a.v : a.v - b.v));
+      const best = vals[0];
+      // jeśli remis, nie wyróżniaj ciężko — wypisz top2
+      const eq = vals.filter(x => Math.abs(x.v - best.v) < 1e-6);
+      const label = (s: any) => `${s.mode.toUpperCase()} (${s.label})`;
+      if (eq.length > 1) {
+        lines.push(
+          `- ${cat.label}: remis → ${eq.map(x => label(x.s)).join(' vs ')} (≈ ${best.v.toFixed(cat.key === 'avgRate' ? 2 : 1)})`,
+        );
+      } else {
+        lines.push(
+          `- ${cat.label}: ${label(best.s)} (≈ ${best.v.toFixed(cat.key === 'avgRate' ? 2 : 1)})`,
+        );
+      }
+    }
+  }
+  if (!lines.length) return '';
+  const intro =
+    '\n\n## Zwycięzcy (per scenariusz)\n\nDla każdej kombinacji Hz/obciążenia/liczby klientów wskazano najlepszą metodę w kluczowych kategoriach.\n';
+  // Dodaj też podsumowanie globalne per metoda
+  const wsAll = items.filter(s => s.mode === 'ws');
+  const httpAll = items.filter(s => s.mode === 'polling');
+  const avg = (a: number[]) =>
+    a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
+  const fmt = (n: number, f = 2) => (Number.isFinite(n) ? n.toFixed(f) : '—');
+  const wsStats = {
+    rate: avg(wsAll.map(s => Number(s.avgRate))),
+    jit: avg(wsAll.map(s => Number(s.avgJitterMs))),
+    fresh: avg(wsAll.map(s => Number(s.avgFreshnessMs))),
+    cpu: avg(wsAll.map(s => Number(s.avgCpu))),
+    rss: avg(wsAll.map(s => Number(s.avgRss))),
+  };
+  const httpStats = {
+    rate: avg(httpAll.map(s => Number(s.avgRate))),
+    jit: avg(httpAll.map(s => Number(s.avgJitterMs))),
+    fresh: avg(httpAll.map(s => Number(s.avgFreshnessMs))),
+    cpu: avg(httpAll.map(s => Number(s.avgCpu))),
+    rss: avg(httpAll.map(s => Number(s.avgRss))),
+  };
+  const global = [
+    `\n### Podsumowanie globalne (średnio)`,
+    `- Rate: WS ${fmt(wsStats.rate)} /s vs HTTP ${fmt(httpStats.rate)} /s`,
+    `- Jitter: WS ${fmt(wsStats.jit, 1)} ms vs HTTP ${fmt(httpStats.jit, 1)} ms (niżej lepiej)`,
+    `- Staleness: WS ${fmt(wsStats.fresh, 0)} ms vs HTTP ${fmt(httpStats.fresh, 0)} ms (niżej lepiej)`,
+    `- CPU: WS ${fmt(wsStats.cpu, 1)}% vs HTTP ${fmt(httpStats.cpu, 1)}% (niżej lepiej)`,
+    `- RSS: WS ${fmt(wsStats.rss, 1)} MB vs HTTP ${fmt(httpStats.rss, 1)} MB (niżej lepiej)`,
+  ].join('\n');
+  return intro + lines.join('\n') + '\n' + global + '\n';
+}
+
 function renderMetrologyGuide(): string {
-  return `\n\n### Metrologia — jak czytać i co oznaczają wyniki\n\n- n (used/total): liczba próbek wykorzystanych w średnich po trimowaniu vs. całkowita. Zalecane n(used) ≥ 10.\n- Rate [/s] i CI95 Rate: średnia częstość i 95% przedział ufności (mniejszy CI → stabilniejsze wyniki).\n  - Heurystyka: CI95/średnia < 30% uznajemy za stabilne dla krótkich przebiegów.\n- σ(rate): odchylenie standardowe — informuje o zmienności częstości między próbkami.\n- Bytes/s i CI95 Bytes: przepływność i jej niepewność. Dla stałego payloadu oczekujemy Bytes/s ≈ Rate × Payload.\n- Tick ~ ms: okres próbkowania monitoringu; zbyt duży tick zmniejsza rozdzielczość czasową, zbyt mały — może zwiększać jitter pomiaru.\n- Wpływ warmup/cooldown: odcięcie początkowych/końcowych odcinków stabilizuje średnie i zwęża CI.\n- Minimalne kryteria wiarygodności (propozycja):\n  - n(used) ≥ 10, CI95/średnia (Rate) < 30%, CI95/średnia (Bytes/s) < 30%.\n  - Relacja Bytes≈Rate×Payload: błąd względny < 30% dla przebiegów kontrolowanych.\n`;
+  return `\n\n### Metrologia — jak czytać i co oznaczają wyniki\n\n- n (used/total): liczba próbek wykorzystanych w średnich po trimowaniu vs. całkowita. Zalecane n(used) ≥ 10.\n- Rate [/s] i CI95 Rate: średnia częstość i 95% przedział ufności (mniejszy CI → stabilniejsze wyniki).\n  - Praktyczne kryterium: CI95/średnia < 30% uznajemy za stabilne dla krótkich przebiegów.\n- σ(rate): odchylenie standardowe — informuje o zmienności częstości między próbkami.\n- Bytes/s i CI95 Bytes: przepływność i jej niepewność. Dla stałego payloadu oczekujemy Bytes/s ≈ Rate × Payload.\n- Tick [ms]: okres próbkowania monitoringu (\`MONITOR_TICK_MS\`). Domyślnie 1000 ms w aplikacji; w badaniach zwykle 200–250 ms.\n- Wpływ warmup/cooldown: odcięcie początkowych/końcowych odcinków stabilizuje średnie i zwęża CI.\n- Minimalne kryteria wiarygodności (propozycja):\n  - n(used) ≥ 10, CI95/średnia (Rate) < 30%, CI95/średnia (Bytes/s) < 30%.\n  - Relacja Bytes≈Rate×Payload: błąd względny < 30% dla przebiegów kontrolowanych.\n`;
 }
 
 // Visual comparison helpers

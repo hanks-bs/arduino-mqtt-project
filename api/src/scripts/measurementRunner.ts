@@ -71,6 +71,8 @@ async function runHttpSimulated(cfg: RunCfg): Promise<SessionRecord> {
     cooldownSec: cfg.cooldownSec,
     loadCpuPct,
     loadWorkers,
+    clientsHttp: Math.max(1, Math.floor(cfg.clientsHttp ?? 1)),
+    internalHttpDriver: false,
     resetCounters: true,
   });
   // Simulate N parallel HTTP clients by spawning N timers
@@ -373,6 +375,9 @@ function exportCsv(sessions: SessionRecord[], outFile: string) {
     'wsJitterMs',
     'tickMs',
     'dataFreshnessMs',
+    'sourceTsMs',
+    'ingestTsMs',
+    'emitTsMs',
   ];
   rows.push(header.join(','));
   sessions.forEach(s => {
@@ -401,6 +406,9 @@ function exportCsv(sessions: SessionRecord[], outFile: string) {
           sample.wsJitterMs.toFixed(2),
           sample.tickMs.toFixed(0),
           sample.dataFreshnessMs.toFixed(0),
+          sample.sourceTsMs != null ? String(sample.sourceTsMs) : '',
+          sample.ingestTsMs != null ? String(sample.ingestTsMs) : '',
+          sample.emitTsMs != null ? String(sample.emitTsMs) : '',
         ].join(','),
       );
     });
@@ -475,6 +483,7 @@ type MeasureOpts = {
   workers?: number; // liczba wątków generatora obciążenia CPU
   warmupSec?: number;
   cooldownSec?: number;
+  repeats?: number; // number of repetitions per scenario (>=1)
 };
 
 export async function runMeasurements(opts: MeasureOpts = {}) {
@@ -593,15 +602,22 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
   }
 
   const sessions: SessionRecord[] = [];
+  const repeats = Math.max(
+    1,
+    Number(opts.repeats ?? process.env.MEASURE_REPEATS ?? '1'),
+  );
   for (const r of runs) {
     console.log(`[Measure] Starting ${r.label} ...`);
-    const sess =
-      r.mode === 'ws' ? await runWsControlled(r) : await runHttpSimulated(r);
-    console.log(
-      `[Measure] Finished ${r.label} (samples=${sess.samples.length})`,
-    );
-    sessions.push(sess);
-    await sleep(500); // small separation
+    for (let i = 0; i < repeats; i++) {
+      const sess =
+        r.mode === 'ws' ? await runWsControlled(r) : await runHttpSimulated(r);
+      console.log(
+        `[Measure] Finished ${r.label} [rep ${i + 1}/${repeats}] (samples=${sess.samples.length})`,
+      );
+      sessions.push(sess);
+      await sleep(300); // small separation between reps
+    }
+    await sleep(500); // separation between scenarios
   }
 
   // Summaries and evaluation
@@ -748,6 +764,7 @@ if (require.main === module) {
   const warmArg = get('warmup');
   const coolArg = get('cooldown');
   const workersArg = get('workers');
+  const repeatsArg = get('repeats');
 
   const cliOpts: MeasureOpts = {
     modes: modesArg
@@ -787,6 +804,7 @@ if (require.main === module) {
     workers: workersArg ? Number(workersArg) : undefined,
     warmupSec: warmArg ? Number(warmArg) : undefined,
     cooldownSec: coolArg ? Number(coolArg) : undefined,
+    repeats: repeatsArg ? Number(repeatsArg) : undefined,
   };
 
   runMeasurements(cliOpts)
@@ -903,7 +921,7 @@ Przyjęte ustawienia tego runu:
  - Częstotliwości [Hz]: ${runConfig.hzSet.join(', ')}
  - Obciążenia CPU [%]: ${runConfig.loadSet.join(', ')}
  - Czas sesji [s]: ${runConfig.durationSec}
- - MONITOR_TICK_MS: ${runConfig.monitorTickMs}
+ - MONITOR_TICK_MS: ${runConfig.monitorTickMs} (okres próbkowania monitora; domyślnie 1000 ms w aplikacji, w badaniach zwykle 200–250 ms)
  - Payloady: WS=${runConfig.wsPayload}B, HTTP=${runConfig.httpPayload}B
  - Klienci: clientsHttp=${runConfig.clientsHttp}, clientsWs=${runConfig.clientsWs}
  - Warmup/Cooldown [s]: ${runConfig.warmupSec || 0} / ${runConfig.cooldownSec || 0}
@@ -938,7 +956,7 @@ ${params}
 
 ## Metrologia (95% CI)
 
-Niepewność średnich (95% CI) dla kluczowych wielkości na sesję. Tick próbkowania ≈ ${process.env.MONITOR_TICK_MS || '1000'} ms.
+Niepewność średnich (95% CI) dla kluczowych wielkości na sesję. Tick próbkowania ≈ ${runConfig.monitorTickMs} ms (sterowany przez \`MONITOR_TICK_MS\`).
 
 | Label | n (used/total) | Rate [/s] | CI95 Rate | σ(rate) | Bytes/s | CI95 Bytes | σ(bytes) |
 |---|:--:|---:|---:|---:|---:|---:|---:|

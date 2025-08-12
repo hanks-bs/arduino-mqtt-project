@@ -324,18 +324,20 @@ Recommended additional test areas:
 
 This project includes a simple but reproducible measurement pipeline to compare WS vs HTTP polling:
 
-- Run a full measurement suite (creates artifacts under `benchmarks/<timestamp>/`):
-  - `yarn measure`
-  - One-command full matrix: `npm run bench:main` (WS/HTTP; Hz: 0.5,1,2,5; load: 0,25,50; clients: 0,10,25,50; tick: 200 ms). After it finishes:
-    - docs auto-update the research file (`docs/ASPEKT_BADAWCZY.md`)
-    - all-runs aggregates are written to `benchmarks/_aggregate.csv` and `benchmarks/_aggregate.json` (also `benchmarks/combined.csv`)
+- Run a measurement suite (artifacts under `benchmarks/<timestamp>/`):
+  - `yarn measure` — direct access to the runner (advanced/manual flags)
+  - Quick sanity: `npm run research:quick`
+  - Safe low‑load: `npm run research:safe`
+  - Solid full run: `npm run research:full` (WS/HTTP; Hz: 0.5,1,2; load: 0,25,50; 30 s; warmup/cooldown 2 s; 2 repeats; tick 200 ms). After it finishes:
+    - the research doc auto‑updates (`docs/ASPEKT_BADAWCZY.md`)
+    - consolidated aggregates are written to `benchmarks/_aggregate.csv`/`_aggregate.json` and `benchmarks/combined.csv`
 - Artifacts per run:
   - `sessions.csv` — flattened per‑second samples for both modes
   - `summary.json` — aggregated metrics (avg rates, bytes/unit, EL delay p99, jitter, freshness)
   - `README.md` — human‑readable summary mapped to the dashboard views
 - Update the research document (inject latest results into `docs/ASPEKT_BADAWCZY.md`):
   - `yarn docs:research:update`
-  - Open the consolidated results quickly: `npm run results:open`
+  - Open reports quickly: `npm run research:open` (latest run doc) or `npm run research:results` (all‑runs summary)
 
 Notes:
 

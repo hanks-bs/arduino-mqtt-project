@@ -52,14 +52,15 @@ param(
   [string]$Modes = "ws,polling",
   [string]$Hz = "0.5,1,2,5",
   [string]$Load = "0,25,50",
-  [string]$DurationSet = "6",
+  [string]$DurationSet = "60",
   [string]$TickSet = "200",
   [string]$ClientsHttpSet = "0,10,25,50",
   [string]$ClientsWsSet = "0,10,25,50",
   [string]$LoadWorkersSet = "1",
-  [int]$Repeats = 1,
-  [double]$Warmup = 0.5,
-  [double]$Cooldown = 0.5
+  [int]$Repeats = 3,
+  [double]$Warmup = 2,
+  [double]$Cooldown = 2,
+  [switch]$PairClients
 )
 
 Set-StrictMode -Version Latest
@@ -97,20 +98,152 @@ try {
   foreach ($dur in $durations) {
     foreach ($tick in $ticks) {
       foreach ($w in $wSet) {
-        foreach ($cHttp in $cHttpSet) {
-          foreach ($cWs in $cWsSet) {
-            for ($r = 1; $r -le [Math]::Max(1,$Repeats); $r++) {
-              Write-Host "[Matrix] Run: modes=$Modes; hz=$Hz; load=$Load; workers=$w; dur=${dur}s; tick=${tick}ms; cHttp=$cHttp; cWs=$cWs; rep=$r" -ForegroundColor Cyan
-              $args = @('--', '--modes', $Modes, '--hz', $Hz, '--load', $Load, '--dur', "$dur", '--tick', "$tick")
-              if ($cHttp -gt 0) { $args += @('--clientsHttp', "$cHttp") }
-              if ($cWs -gt 0)   { $args += @('--clientsWs',   "$cWs") }
-              $args += @('--warmup', "$Warmup", '--cooldown', "$Cooldown", '--workers', "$w")
-
-              # ustaw środowisko dla liczby workerów również przez ENV (na wszelki wypadek)
-              $prevWorkers = $env:MEASURE_LOAD_WORKERS
+        if ($PairClients) {
+          # Iterate only matching pairs (cHttp == cWs); use intersection, fallback to union if empty
+          $cPairs = @()
+          $inter = @($cHttpSet | Where-Object { $cWsSet -contains $_ })
+          if ($inter.Count -gt 0) {
+            $cPairs = @($inter)
+          } else {
+            $cPairs = @([System.Linq.Enumerable]::Distinct([int[]]@($cHttpSet + $cWsSet)))
+          }
+          foreach ($c in $cPairs) {
+            $cHttp = [int]$c; $cWs = [int]$c
+            Write-Host "[Matrix] Run: modes=$Modes; hz=$Hz; load=$Load; workers=$w; dur=${dur}s; tick=${tick}ms; cHttp=$cHttp; cWs=$cWs; repeats=$Repeats (runner)" -ForegroundColor Cyan
+              # Ustaw parametry przez ENV (bardziej niezawodne niż przekazywanie flag npm)
+              # Uwaga: powtórzenia realizuje measurementRunner (MEASURE_REPEATS); brak pętli po rep w orkiestratorze.
+              $prevEnv = @{
+                MEASURE_MODES           = $env:MEASURE_MODES
+                MEASURE_HZ_SET          = $env:MEASURE_HZ_SET
+                MEASURE_LOAD_SET        = $env:MEASURE_LOAD_SET
+                MEASURE_DURATION_SEC    = $env:MEASURE_DURATION_SEC
+                MONITOR_TICK_MS         = $env:MONITOR_TICK_MS
+                MEASURE_CLIENTS_HTTP    = $env:MEASURE_CLIENTS_HTTP
+                MEASURE_CLIENTS_WS      = $env:MEASURE_CLIENTS_WS
+                MEASURE_WARMUP_SEC      = $env:MEASURE_WARMUP_SEC
+                MEASURE_COOLDOWN_SEC    = $env:MEASURE_COOLDOWN_SEC
+                MEASURE_REPEATS         = $env:MEASURE_REPEATS
+                MEASURE_LOAD_WORKERS    = $env:MEASURE_LOAD_WORKERS
+              }
+              $env:MEASURE_MODES = $Modes
+              $env:MEASURE_HZ_SET = $Hz
+              $env:MEASURE_LOAD_SET = $Load
+              $env:MEASURE_DURATION_SEC = "$dur"
+              $env:MONITOR_TICK_MS = "$tick"
+              $env:MEASURE_CLIENTS_HTTP = "$cHttp"
+              $env:MEASURE_CLIENTS_WS = "$cWs"
+              $env:MEASURE_WARMUP_SEC = "$Warmup"
+              $env:MEASURE_COOLDOWN_SEC = "$Cooldown"
+              $env:MEASURE_REPEATS = "$Repeats"
               $env:MEASURE_LOAD_WORKERS = "$w"
-              & npm.cmd run measure --silent @args
-              $env:MEASURE_LOAD_WORKERS = $prevWorkers
+
+              & npm.cmd run measure --silent
+
+              # Przywróć ENV
+              foreach ($k in $prevEnv.Keys) {
+                if ($null -eq $prevEnv[$k]) {
+                  Remove-Item -Path ("Env:" + $k) -ErrorAction SilentlyContinue
+                } else {
+                  Set-Item -Path ("Env:" + $k) -Value $prevEnv[$k]
+                }
+              }
+              if ($LASTEXITCODE -ne 0) { Write-Error "Runner zwrócił kod $LASTEXITCODE" }
+
+              & npm.cmd run docs:research:update --silent
+
+              $last = Get-ChildItem $benchRoot -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+              if ($null -eq $last) { Write-Warning 'Brak katalogu wyników'; continue }
+              $summaryPath = Join-Path $last.FullName 'summary.json'
+              if (-not (Test-Path $summaryPath)) { Write-Warning "Brak summary.json w $($last.Name)"; continue }
+              $json = Get-Content -Raw -Path $summaryPath | ConvertFrom-Json
+              $wsCount = @($json.summaries | Where-Object { $_.mode -eq 'ws' }).Count
+              $httpCount = @($json.summaries | Where-Object { $_.mode -eq 'polling' }).Count
+              $sessCount = @($json.summaries).Count
+              $line = @(
+                $last.Name,
+                '"' + $Modes + '"',
+                '"' + $Hz + '"',
+                '"' + $Load + '"',
+                $w,
+                $dur,
+                $tick,
+                $cHttp,
+                $cWs,
+                $sessCount,
+                $wsCount,
+                $httpCount,
+                '"' + $last.FullName + '"'
+              ) -join ','
+              Add-Content -Path $indexCsv -Value $line
+
+              foreach ($s in $json.summaries) {
+                $row = @(
+                  $last.Name,
+                  '"' + ($s.label -replace '"','''') + '"',
+                  $s.mode,
+                  [int]$s.loadCpuPct,
+                  $w,
+                  [int]$s.count,
+                  [string]::Format('{0:F3}',[double]$s.avgRate),
+                  [string]::Format('{0:F0}',[double]$s.avgBytesRate),
+                  [string]::Format('{0:F0}',[double]$s.avgPayload),
+                  [string]::Format('{0:F1}',[double]$s.avgJitterMs),
+                  [string]::Format('{0:F0}',[double]$s.avgFreshnessMs),
+                  [string]::Format('{0:F1}',[double]$s.avgDelayP99),
+                  [string]::Format('{0:F1}',[double]$s.avgCpu),
+                  [string]::Format('{0:F1}',[double]$s.avgRss),
+                  [string]::Format('{0:F2}',[double]$s.ci95Rate),
+                  [string]::Format('{0:F0}',[double]$s.ci95Bytes),
+                  $tick,
+                  $dur,
+                  $cHttp,
+                  $cWs
+                ) -join ','
+                Add-Content -Path $allCsv -Value $row
+              }
+          }
+        }
+        else {
+          foreach ($cHttp in $cHttpSet) {
+            foreach ($cWs in $cWsSet) {
+              Write-Host "[Matrix] Run: modes=$Modes; hz=$Hz; load=$Load; workers=$w; dur=${dur}s; tick=${tick}ms; cHttp=$cHttp; cWs=$cWs; repeats=$Repeats (runner)" -ForegroundColor Cyan
+              # Ustaw parametry przez ENV (bardziej niezawodne niż przekazywanie flag npm)
+              # Uwaga: powtórzenia realizuje measurementRunner (MEASURE_REPEATS); brak pętli po rep w orkiestratorze.
+              $prevEnv = @{
+                MEASURE_MODES           = $env:MEASURE_MODES
+                MEASURE_HZ_SET          = $env:MEASURE_HZ_SET
+                MEASURE_LOAD_SET        = $env:MEASURE_LOAD_SET
+                MEASURE_DURATION_SEC    = $env:MEASURE_DURATION_SEC
+                MONITOR_TICK_MS         = $env:MONITOR_TICK_MS
+                MEASURE_CLIENTS_HTTP    = $env:MEASURE_CLIENTS_HTTP
+                MEASURE_CLIENTS_WS      = $env:MEASURE_CLIENTS_WS
+                MEASURE_WARMUP_SEC      = $env:MEASURE_WARMUP_SEC
+                MEASURE_COOLDOWN_SEC    = $env:MEASURE_COOLDOWN_SEC
+                MEASURE_REPEATS         = $env:MEASURE_REPEATS
+                MEASURE_LOAD_WORKERS    = $env:MEASURE_LOAD_WORKERS
+              }
+              $env:MEASURE_MODES = $Modes
+              $env:MEASURE_HZ_SET = $Hz
+              $env:MEASURE_LOAD_SET = $Load
+              $env:MEASURE_DURATION_SEC = "$dur"
+              $env:MONITOR_TICK_MS = "$tick"
+              $env:MEASURE_CLIENTS_HTTP = "$cHttp"
+              $env:MEASURE_CLIENTS_WS = "$cWs"
+              $env:MEASURE_WARMUP_SEC = "$Warmup"
+              $env:MEASURE_COOLDOWN_SEC = "$Cooldown"
+              $env:MEASURE_REPEATS = "$Repeats"
+              $env:MEASURE_LOAD_WORKERS = "$w"
+
+              & npm.cmd run measure --silent
+
+              # Przywróć ENV
+              foreach ($k in $prevEnv.Keys) {
+                if ($null -eq $prevEnv[$k]) {
+                  Remove-Item -Path ("Env:" + $k) -ErrorAction SilentlyContinue
+                } else {
+                  Set-Item -Path ("Env:" + $k) -Value $prevEnv[$k]
+                }
+              }
               if ($LASTEXITCODE -ne 0) { Write-Error "Runner zwrócił kod $LASTEXITCODE" }
 
               # Zaktualizuj dokument badawczy po każdym przebiegu
@@ -126,9 +259,9 @@ try {
               $json = Get-Content -Raw -Path $summaryPath | ConvertFrom-Json
 
               # Policz ws/http
-              $wsCount = ($json.summaries | Where-Object { $_.mode -eq 'ws' }).Count
-              $httpCount = ($json.summaries | Where-Object { $_.mode -eq 'polling' }).Count
-              $sessCount = ($json.summaries).Count
+              $wsCount = @($json.summaries | Where-Object { $_.mode -eq 'ws' }).Count
+              $httpCount = @($json.summaries | Where-Object { $_.mode -eq 'polling' }).Count
+              $sessCount = @($json.summaries).Count
 
               # Dopisz indeks
               $line = @(
@@ -174,8 +307,8 @@ try {
                 ) -join ','
                 Add-Content -Path $allCsv -Value $row
               }
-            }
           }
+        }
         }
       }
     }

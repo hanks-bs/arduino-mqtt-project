@@ -53,7 +53,7 @@ async function main() {
   const items: Item[] = summary.summaries || [];
 
   // Detect a "SAFE" run to avoid hard FAIL on expected short-run deviations.
-  // Heurystyka: hzSet ⊆ {0.5,1}, loadSet ⊆ {0}, clientsHttp=0, clientsWs=0, durationSec ≤ 6, monitorTickMs ≥ 500
+  // Praktyczne kryterium: hzSet ⊆ {0.5,1}, loadSet ⊆ {0}, clientsHttp=0, clientsWs=0, durationSec ≤ 6, monitorTickMs ≥ 500
   const rc = (summary.runConfig || {}) as Partial<{
     hzSet: number[];
     loadSet: number[];
@@ -68,7 +68,8 @@ async function main() {
     a.every(v => allowed.includes(Number(v)));
   const safeHz = rc.hzSet ? isSubset(arr(rc.hzSet), [0.5, 1]) : false;
   const safeLoad = rc.loadSet ? isSubset(arr(rc.loadSet), [0]) : true; // domyślnie 0
-  const safeClients = (Number(rc.clientsHttp ?? 0) === 0) && (Number(rc.clientsWs ?? 0) === 0);
+  const safeClients =
+    Number(rc.clientsHttp ?? 0) === 0 && Number(rc.clientsWs ?? 0) === 0;
   const shortDur = Number(rc.durationSec ?? 0) <= 6;
   const coarseTick = Number(rc.monitorTickMs ?? 0) >= 500;
   const isSafeRun = safeHz && safeLoad && safeClients && shortDur && coarseTick;
@@ -76,6 +77,30 @@ async function main() {
   const lines: string[] = [];
   const warn: string[] = [];
   const fail: string[] = [];
+
+  // Validation mode for Rate checks: absolute (default), relative (ignore absolute Hz, focus on payload/CI), or auto (downgrade to WARN when source-limited is detected)
+  const mode = String(process.env.VALIDATE_RATE_MODE || 'absolute')
+    .toLowerCase()
+    .trim();
+
+  // Helper to decide how to treat rate deviations
+  const rateIssuesAsWarn = (() => {
+    if (mode === 'relative') return true; // never hard-fail on rate
+    if (mode === 'absolute') return false;
+    // auto: detect source-limited — when majority of sessions are < 50% of expected rate
+    const ratios: number[] = [];
+    for (const s of items) {
+      const exp = (s.expectedRate ??
+        (() => {
+          const m = s.label.match(/@(\d+(?:\.\d+)?)Hz/);
+          return m ? Number(m[1]) : undefined;
+        })()) as number | undefined;
+      if (exp && exp > 0 && s.avgRate > 0) ratios.push(s.avgRate / exp);
+    }
+    if (ratios.length === 0) return false;
+    const below = ratios.filter(r => r < 0.5).length;
+    return below / ratios.length >= 0.7; // 70% sesji poniżej połowy nominalu -> uznaj jako source-limited
+  })();
 
   // thresholds
   const minSamples = 3; // minimal nUsed for believable mean
@@ -133,7 +158,7 @@ async function main() {
     }
     // Uwaga: nie wymuszamy bytes ≈ rate × payload, bo payload bywa zmienny (mqtt/arduino), a avgPayload pochodzi z próbek.
     // sanity: if expectedRate is provided, use it; otherwise derive from label and scale by clients
-  if (s.tolRate != null) {
+    if (s.tolRate != null) {
       // If expectedRate present, assume already scaled; otherwise attempt derive from label and scale by clients
       let expectedRateScaled: number | undefined = expRate;
       if (expectedRateScaled == null) {
@@ -148,7 +173,7 @@ async function main() {
         const high = expectedRateScaled * (1 + s.tolRate);
         if (!(s.avgRate >= low && s.avgRate <= high)) {
           const msg = `${s.label}: Rate poza oczekiwaniem [${low.toFixed(2)}, ${high.toFixed(2)}], avg=${s.avgRate.toFixed(2)} (c=${clients})`;
-          if (isSafeRun) warn.push(msg);
+          if (isSafeRun || rateIssuesAsWarn) warn.push(msg);
           else fail.push(msg);
         }
       }

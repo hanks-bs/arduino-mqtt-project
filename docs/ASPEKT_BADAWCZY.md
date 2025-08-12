@@ -9,12 +9,18 @@ Celem jest ilościowe porównanie dwóch sposobów dostarczania danych telemetry
 - WebSocket (WS) – transmisja push,
 - HTTP Polling – cykliczne odpytywanie (pull).
 
-Kluczowe pytania i hipotezy:
+Kluczowe pytania i hipotezy (H):
 
-- P1: WS daje mniejszą latencję staleness (wiek danych) niż HTTP dla porównywalnych częstotliwości (1–2 Hz).
-- P2: Zależność bytesRate ≈ rate × payload powinna być spełniona dla obu metod (przy stałym ładunku).
-- P3: Stabilność interwałów (jitter) jest lepsza przy kontrolowanym źródle (WS driver) niż przy tykaniu UI.
-- P4: Narzut CPU/RSS i opóźnienia pętli zdarzeń (ELU p99) pozostają akceptowalne przy 1–2 Hz.
+- H1: WebSocket (push) zapewnia niższy staleness [ms] niż HTTP polling przy tych samych Hz (0.5–2 Hz), bo dane trafiają „natychmiast” po publikacji, a nie w oknie odpytywania.
+- H2: Dla stałego ładunku Bytes/s ≈ Rate × Payload (w obu metodach); odchylenie > 30% wskazuje błąd lub silny jitter/trim.
+- H3: Jitter [ms] (stabilność interwałów) jest niższy w WS (sterowany driver) niż w HTTP (timery/kolejki JS).
+- H4: Narzut CPU i ELU p99 rośnie wraz z Hz i liczbą klientów; przy ≤ 2 Hz obie metody mieszczą się w „akceptowalnym” zakresie dla pojedynczej instancji API.
+- H5: Przy wzroście liczby klientów obciążenie CPU i pamięci rośnie szybciej dla HTTP (koszt żądań) niż dla WS (broadcast).
+
+Charakterystyka metod i oczywiste różnice obserwowalne od razu:
+
+- WS: push, brak stałego narzutu request/response; „świeższe” dane (niższy staleness), zwykle mniejszy jitter; lepsza wydajność broadcastu do wielu klientów.
+- HTTP: pull, okres odpytywania determinuje staleness (≈ okres); koszt per klient (request/headers), większy narzut przy N klientach; jitter zależny od precyzji timerów i obciążenia event loop.
 
 ## 2. Metryki i definicje
 
@@ -33,7 +39,7 @@ Mierzone metryki (wyliczane co ok. 1 s):
 ## 3. Aparatura i środowisko
 
 - Arduino → MQTT broker → API (Node.js/Express, Socket.IO) → Dashboard (Next.js/MUI/ApexCharts).
-- Częstotliwość monitoringu: domyślnie 1 s (`MONITOR_TICK_MS`).
+- Częstotliwość monitoringu: sterowana przez `MONITOR_TICK_MS` (domyślnie 1000 ms w aplikacji; w skryptach badawczych najczęściej 200–250 ms).
 - Sterownik WS (tryb kontrolowany): stała częstotliwość (wsFixedRateHz) oraz założony rozmiar ładunku.
 - HTTP (symulacja): wewnętrzny licznik odpowiedzi (onHttpResponse) z określonym rozmiarem ładunku.
 - Emisje na żywo podczas pomiarów: wyłączone (izolacja wyników), włączane automatycznie dla sesji WS.
@@ -46,7 +52,11 @@ Mierzone metryki (wyliczane co ok. 1 s):
 - Oddzielenie sesji krótką przerwą; agregacja po próbkach z domyślnym trimmowaniem warmup/cooldown (0.5 s / 0.5 s).
 - Automatyczny pomiar:
   - Skrypt: `api/src/scripts/measurementRunner.ts`
-  - Uruchomienie (z katalogu `api`): `yarn measure`
+  - Uruchomienie (z katalogu `api`):
+    - `npm run research:quick` — szybki sanity check (krótki przebieg) + walidacja auto
+    - `npm run research:safe` — ostrożny bieg (Hz ≤ 1, tick=500 ms) + walidacja auto
+    - `npm run research:full` — alias do solidnego biegu „robust” (30 s, 2 powtórzenia; Hz: 0.5,1,2; obciążenia: 0,25,50) + walidacja auto
+    - `npm run research:matrix` — pełna macierz przez skrypt PowerShell (rozszerzenia: klienci, wyższe Hz)
   - Pliki wynikowe: `api/benchmarks/<timestamp>/sessions.csv`, `summary.json`, `README.md`.
 
 ## 5. Kryteria oceny (wstępna walidacja)
@@ -106,54 +116,120 @@ Zawiera podsumowanie sesji, uśrednione wyniki wg obciążenia i liczby klientó
 
 <!-- AUTO-RESULTS:BEGIN -->
 
-Ostatni run: 2025-08-10T01-05-34-442Z
+Ostatni run: 2025-08-12T08-44-38-980Z
 
-Pliki: [sessions.csv](../api/benchmarks/2025-08-10T01-05-34-442Z/sessions.csv), [summary.json](../api/benchmarks/2025-08-10T01-05-34-442Z/summary.json), [README](../api/benchmarks/2025-08-10T01-05-34-442Z/README.md)
+Pliki: [sessions.csv](../api/benchmarks/2025-08-12T08-44-38-980Z/sessions.csv), [summary.json](../api/benchmarks/2025-08-12T08-44-38-980Z/summary.json), [README](../api/benchmarks/2025-08-12T08-44-38-980Z/README.md)
 
 Uwaga: tabele uporządkowane wg: Mode (WS, HTTP) → Hz → Obciążenie → Klienci.
 
-
-| Label | Mode | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | Staleness [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] | n (used/total) | Rate OK | Payload OK |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|:--:|:--:|:--:|
-
-
-
+| Label                 |    Mode | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | Staleness [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] | n (used/total) | Rate OK | Payload OK |
+| --------------------- | ------: | --------: | ------: | -----------: | ----------: | -------------: | -----------: | ------: | -------: | :------------: | :-----: | :--------: |
+| WS@1Hz payload=360B   |      ws |      0.19 |      67 |          360 |         5.2 |            532 |         53.1 |     0.3 |    202.0 |     41/54      |   ❌    |     ✅     |
+| HTTP@1Hz payload=420B | polling |      0.19 |      80 |          420 |         3.7 |            493 |         49.7 |     0.3 |    179.6 |     40/60      |   ❌    |     ✅     |
 
 Parametry przyjęte w ostatnim runie:
-- Metody: 
-- Częstotliwości [Hz]: 1, 2
-- Obciążenia CPU [%]: 25
-- Czas sesji [s]: 6
+
+- Metody: ws, polling
+- Częstotliwości [Hz]: 1
+- Obciążenia CPU [%]: 0
+- Czas sesji [s]: 12
 - MONITOR_TICK_MS: 200
 - Payloady: WS=360B, HTTP=420B
 - Klienci: clientsHttp=0, clientsWs=0
-- Warmup/Cooldown [s]: 0.5 / 0.5
+- Warmup/Cooldown [s]: 2 / 2
 
+## Uśrednione wyniki wg obciążenia
 
+Uwaga: "Obciążenie" oznacza sztuczne obciążenie CPU procesu podczas sesji (generator w worker_threads).
 
+### Porównanie wg obciążenia — WebSocket
 
+| Obciążenie | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] |
+| ---------: | --------: | ------: | -----------: | ----------: | -----------: | ------: | -------: |
+|         0% |      0.19 |      67 |          360 |         5.2 |         53.1 |     0.3 |    202.0 |
 
+### Porównanie wg obciążenia — HTTP polling
 
+| Obciążenie | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] |
+| ---------: | --------: | ------: | -----------: | ----------: | -----------: | ------: | -------: |
+|         0% |      0.19 |      80 |          420 |         3.7 |         49.7 |     0.3 |    179.6 |
 
+## Uśrednione wyniki wg liczby klientów
 
+Uwaga: "Liczba klientów" to liczba równoległych syntetycznych klientów generowanych wewnętrznie na czas sesji (HTTP: liczbę timerów; WS: efektywną sumaryczną częstość).
+
+### Zestawienie wg liczby klientów — WebSocket
+
+| Klienci | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] |
+| ------: | --------: | ------: | -----------: | ----------: | -----------: | ------: | -------: |
+|       0 |      0.19 |      67 |          360 |         5.2 |         53.1 |     0.3 |    202.0 |
+
+### Zestawienie wg liczby klientów — HTTP polling
+
+| Klienci | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] |
+| ------: | --------: | ------: | -----------: | ----------: | -----------: | ------: | -------: |
+|       1 |      0.19 |      80 |          420 |         3.7 |         49.7 |     0.3 |    179.6 |
+
+## Metrologia (95% CI) — ostatni run
+
+Niepewność średnich estymowana z próbek (tick ~ 200 ms).
+
+| Label                 | n (used/total) | Rate [/s] | CI95 Rate | σ(rate) | Bytes/s | CI95 Bytes | σ(bytes) |
+| --------------------- | :------------: | --------: | --------: | ------: | ------: | ---------: | -------: |
+| WS@1Hz payload=360B   |     41/54      |      0.19 |    ± 0.12 |    0.38 |      67 |       ± 42 |      137 |
+| HTTP@1Hz payload=420B |     40/60      |      0.19 |    ± 0.12 |    0.39 |      80 |       ± 51 |      166 |
 
 ### Metrologia — jak czytać i co oznaczają wyniki
 
 - n (used/total): liczba próbek wykorzystanych w średnich po trimowaniu vs. całkowita. Zalecane n(used) ≥ 10.
 - Rate [/s] i CI95 Rate: średnia częstość i 95% przedział ufności (mniejszy CI → stabilniejsze wyniki).
-  - Heurystyka: CI95/średnia < 30% uznajemy za stabilne dla krótkich przebiegów.
+  - Praktyczne kryterium: CI95/średnia < 30% uznajemy za stabilne dla krótkich przebiegów.
 - σ(rate): odchylenie standardowe — informuje o zmienności częstości między próbkami.
 - Bytes/s i CI95 Bytes: przepływność i jej niepewność. Dla stałego payloadu oczekujemy Bytes/s ≈ Rate × Payload.
-- Tick ~ ms: okres próbkowania monitoringu; zbyt duży tick zmniejsza rozdzielczość czasową, zbyt mały — może zwiększać jitter pomiaru.
+- Tick [ms]: okres próbkowania monitoringu (`MONITOR_TICK_MS`). Domyślnie 1000 ms w aplikacji; w badaniach zwykle 200–250 ms.
 - Wpływ warmup/cooldown: odcięcie początkowych/końcowych odcinków stabilizuje średnie i zwęża CI.
 - Minimalne kryteria wiarygodności (propozycja):
   - n(used) ≥ 10, CI95/średnia (Rate) < 30%, CI95/średnia (Bytes/s) < 30%.
   - Relacja Bytes≈Rate×Payload: błąd względny < 30% dla przebiegów kontrolowanych.
 
+## Wnioski (syntetyczne)
 
+- WS@1Hz payload=360B: rate=0.19 in [0.50, 1.50] (c=1); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
+- HTTP@1Hz payload=420B: rate=0.19 in [0.50, 1.50] (c=1); bytesPerUnit=420.0 in [210.0, 630.0] (trim: warmup=2s, cooldown=2s)
 
+## Walidacja wiarygodności i poprawności
 
+Validation status: WARN
+Run: 2025-08-12T08-44-38-980Z
 
+- Rate OK: 0% (0/2)
+- Payload OK: 100% (2/2)
+- Minimalna liczba próbek n(used): 40
+- Średni względny CI95: Rate ≈ 63%, Bytes/s ≈ 63%
+
+Uwaga: FAIL wynika głównie z odchyleń Rate od oczekiwanych Hz. To spodziewane, jeśli źródło danych (Arduino/MQTT) publikuje ~1 Hz niezależnie od ustawień nominalnych. Payload przechodzi (OK) we wszystkich scenariuszach.
+
+## Wnioski — wizualne porównanie
+
+### Wnioski — porównanie WS vs HTTP wg obciążenia
+
+| Obciążenie [%] | Rate WS [/s] | Rate HTTP [/s] | Jitter WS [ms] | Jitter HTTP [ms] | Staleness WS [ms] | Staleness HTTP [ms] | ELU p99 WS [ms] | ELU p99 HTTP [ms] | CPU WS [%] | CPU HTTP [%] | RSS WS [MB] | RSS HTTP [MB] |
+| -------------: | -----------: | -------------: | -------------: | ---------------: | ----------------: | ------------------: | --------------: | ----------------: | ---------: | -----------: | ----------: | ------------: |
+|              0 |         0.19 |       **0.19** |            5.2 |          **3.7** |               532 |             **493** |            53.1 |          **49.7** |        0.3 |      **0.3** |       202.0 |     **179.6** |
+
+### Wnioski — porównanie WS vs HTTP wg liczby klientów
+
+| Klienci | Rate WS [/s] | Rate HTTP [/s] | Jitter WS [ms] | Jitter HTTP [ms] | Staleness WS [ms] | Staleness HTTP [ms] | ELU p99 WS [ms] | ELU p99 HTTP [ms] | CPU WS [%] | CPU HTTP [%] | RSS WS [MB] | RSS HTTP [MB] |
+| ------: | -----------: | -------------: | -------------: | ---------------: | ----------------: | ------------------: | --------------: | ----------------: | ---------: | -----------: | ----------: | ------------: |
+|       0 |         0.19 |              — |            5.2 |                — |               532 |                   — |            53.1 |                 — |        0.3 |            — |       202.0 |             — |
+|       1 |            — |           0.19 |              — |              3.7 |                 — |                 493 |               — |              49.7 |          — |          0.3 |           — |         179.6 |
+
+### Wnioski — krótkie podsumowanie (WS vs HTTP)
+
+- Średnio (ten run): Rate — WS 0.19 /s vs HTTP 0.19 /s
+- Średnio: Jitter — WS 5.2 ms vs HTTP 3.7 ms (niżej = stabilniej)
+- Średnio: Staleness — WS 532 ms vs HTTP 493 ms (niżej = świeżej)
+- Średnio: CPU — WS 0.3% vs HTTP 0.3% (niżej = lżej)
 
 <!-- AUTO-RESULTS:END -->
 
@@ -188,7 +264,7 @@ Uwagi metodologiczne dot. prezentacji wyników:
 - ELU p99 [ms] — 99. percentyl opóźnień pętli zdarzeń (większe piki wskazują blokady/GC/I/O).
 - Jitter [ms] — zmienność odstępów między kolejnymi zdarzeniami (odchylenie standardowe; niższe = stabilniej).
 - Staleness [ms] (wiek danych) — czas od ostatniego odczytu danych z urządzenia do chwili pomiaru (niżej = świeższe dane na UI/API).
-- Tick [ms] — okres próbkowania monitoringu (MONITOR_TICK_MS); determinuje częstotliwość zapisu próbek.
+- Tick [ms] — okres próbkowania monitoringu (`MONITOR_TICK_MS`). Domyślnie 1000 ms w aplikacji; w badaniach zwykle 200–250 ms.
 - n (used/total) — liczba próbek wykorzystanych po trimowaniu warmup/cooldown względem całkowitej liczby próbek sesji.
 - Warmup/Cooldown [s] — okna czasowe na początku/końcu sesji wyłączane z agregacji (stabilizacja wyników).
 - Obciążenie CPU (loadCpuPct, loadWorkers) — sztuczne obciążenie tła: docelowy udział CPU oraz liczba wątków generatora.
@@ -201,26 +277,27 @@ Uwagi metodologiczne dot. prezentacji wyników:
 - W sekcjach „Zestawienie wg obciążenia” oraz „wg liczby klientów” wartości są uśredniane per kategoria, co pozwala szybko ocenić skalowanie metod.
 - Dla oceny wiarygodności średnich korzystaj z „Metrologia (95% CI)” — im węższy przedział ufności i większe n (used), tym stabilniejsze wyniki.
 
-## 16. Jak uruchomić testy (jedna komenda)
+## 16. Jak uruchomić badania (jedna komenda)
 
-- Podstawowa komenda (zalecana, pełna macierz): w katalogu `api` uruchom: `npm run bench:main`
+- Podstawowa komenda (zalecana, pełna macierz): w katalogu `api` uruchom: `npm run research:full`
   - Alias do kompletnej orkiestracji (WS/HTTP; Hz: 0.5, 1, 2, 5; obciążenia: 0,25,50; klienci: 0,10,25,50; tick: 200 ms).
   - Po zakończeniu wyniki trafią do `api/benchmarks/<timestamp>/`, sekcja AUTO-RESULTS zaktualizuje się automatycznie oraz powstanie raport zbiorczy `docs/WYNIKI_ZBIORCZE.md` (agregacja wszystkich dotychczasowych runów).
 
 Opcjonalne skróty:
 
-- `npm run bench:quick` — szybki przebieg (krótszy czas, bez pełnej macierzy).
-- `npm run bench:safe` — tryb bezpieczny termicznie: Hz ≤ 1 (0.5,1), bez obciążeń i dodatkowych klientów, krótsze sesje (4 s), tick=500 ms. Zalecany na gorącej maszynie.
-- `npm run bench:clients` — tylko warianty ze zwiększoną liczbą klientów (sekcja „wg liczby klientów” w AUTO-RESULTS zostanie uzupełniona).
-- `npm run bench:study` — dłuższy przebieg do analizy metrologicznej i walidacji.
+- `npm run research:quick` — szybki przebieg (krótki, bez pełnej macierzy) + walidacja auto.
+- `npm run research:safe` — tryb bezpieczny: Hz ≤ 1 (0.5,1), bez obciążeń i klientów; tick=500 ms + walidacja auto.
+- `npm run research:robust` — ustandaryzowany, solidny przebieg (Hz: 0.5,1,2; Load: 0,25,50; 30 s; warmup/cooldown 2 s; 2 powtórzenia; tick=200 ms) + walidacja w trybie auto (źródło‑limitowane → WARN, nie FAIL).
+- `npm run research:matrix` — pełna macierz przez `tools/orchestrate-benchmarks.ps1` (rozszerza o klientów, wyższe Hz, warianty tick itp.).
 
 Zbiorczy raport ze wszystkich uruchomień:
 
-- `npm run bench:aggregate` — generuje/aktualizuje `api/benchmarks/combined.csv` oraz `docs/WYNIKI_ZBIORCZE.md` (wymaga, by wcześniej powstał `api/benchmarks/_all_summaries.csv`, tworzony przez `bench:main`).
+- `npm run research:aggregate` — generuje/aktualizuje `api/benchmarks/combined.csv` oraz `docs/WYNIKI_ZBIORCZE.md`.
 
-Szybkie otwarcie raportu zbiorczego:
+Szybkie otwarcie raportów:
 
-- `npm run results:open`
+- `npm run research:open` — otwiera `docs/ASPEKT_BADAWCZY.md`
+- `npm run research:results` — otwiera `docs/WYNIKI_ZBIORCZE.md`
 
 Uwaga dot. zakresu częstotliwości:
 
@@ -229,7 +306,7 @@ Uwaga dot. zakresu częstotliwości:
 
 Bezpieczeństwo termiczne (tryb SAFE):
 
-- Gdy CPU/obudowa nagrzewa się nadmiernie, użyj `npm run bench:safe` lub `npm run bench:safe:main`.
+- Gdy CPU/obudowa nagrzewa się nadmiernie, użyj `npm run research:safe`.
 - Ogranicza macierz do 0.5–1 Hz, bez obciążeń i klientów, skraca czas i zwiększa tick do 500 ms, znacząco redukując pobór CPU.
 - Zachowuje tę samą strukturę wyników i automatyczne uzupełnianie sekcji AUTO-RESULTS.
 

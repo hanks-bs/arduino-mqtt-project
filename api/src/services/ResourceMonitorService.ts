@@ -44,6 +44,10 @@ export interface LiveMetrics {
   httpJitterMs: number; // standard deviation of intervals between HTTP responses (ms, rolling)
   wsJitterMs: number; // standard deviation of intervals between WS messages (ms, rolling)
   dataFreshnessMs: number; // difference (now - timestamp of the last measurement); lower is fresher
+  /** Telemetria czasu: ostatni znany czas źródła (Arduino), ingest (HTTP/WS w API) i emit (WS do klientów) [epoch ms]. */
+  sourceTsMs?: number;
+  ingestTsMs?: number;
+  emitTsMs?: number;
 
   totalHttpRequests: number; // cumulative since process start
   totalWsMessages: number; // cumulative since process start
@@ -81,6 +85,8 @@ export interface SessionConfig {
   clientsHttp?: number;
   /** Optional: number of synthetic WebSocket clients (internal). */
   clientsWs?: number;
+  /** Optional: start internal HTTP polling driver (default: true for mode='polling'). */
+  internalHttpDriver?: boolean;
   /** Optional: reset cumulative counters at session start (for clean totals). */
   resetCounters?: boolean;
 }
@@ -148,6 +154,9 @@ class ResourceMonitorService {
   private lastWsMessageAt: number | null = null;
   private lastHttpResponseAt: number | null = null;
   private lastArduinoTimestamp: string | null = null;
+  private lastArduinoTsMs: number | null = null;
+  private lastIngestAtMs: number | null = null;
+  private lastEmitAtMs: number | null = null;
 
   private tickInterval: NodeJS.Timeout | null = null;
   private histogram = monitorEventLoopDelay({ resolution: 20 });
@@ -240,6 +249,7 @@ class ResourceMonitorService {
     this.totalHttpRequests += 1;
     this.totalHttpBytes += bytes;
     const now = Date.now();
+  this.lastIngestAtMs = now;
     if (this.lastHttpResponseAt) {
       const delta = now - this.lastHttpResponseAt;
       if (delta >= 0) this.pushInterval(this.httpIntervals, delta);
@@ -255,6 +265,7 @@ class ResourceMonitorService {
     this.totalWsMessages += 1;
     this.totalWsBytes += bytes;
     const now = Date.now();
+  this.lastEmitAtMs = now;
     if (this.lastWsMessageAt) {
       const delta = now - this.lastWsMessageAt;
       if (delta >= 0) this.pushInterval(this.wsIntervals, delta);
@@ -280,6 +291,8 @@ class ResourceMonitorService {
   /** Updates last Arduino timestamp for data freshness calculations. */
   setLastArduinoTimestamp(ts: string) {
     this.lastArduinoTimestamp = ts;
+  const t = Date.parse(ts);
+  if (!Number.isNaN(t)) this.lastArduinoTsMs = t;
   }
 
   /** Inform the monitor about the last observed Arduino payload size (bytes). */
@@ -348,7 +361,7 @@ class ResourceMonitorService {
     this.activeSessionId = id;
 
     // start internal HTTP driver if needed
-    if (cfg.mode === 'polling') {
+  if (cfg.mode === 'polling' && (cfg.internalHttpDriver ?? true)) {
       const every = cfg.pollingIntervalMs ?? 1000;
       const clients = Math.max(1, Math.floor(cfg.clientsHttp ?? 1));
       this.startSelfPolling(every, clients);
@@ -585,6 +598,9 @@ class ResourceMonitorService {
       httpJitterMs,
       wsJitterMs,
       dataFreshnessMs,
+  sourceTsMs: this.lastArduinoTsMs ?? undefined,
+  ingestTsMs: this.lastIngestAtMs ?? undefined,
+  emitTsMs: this.lastEmitAtMs ?? undefined,
 
       totalHttpRequests: this.totalHttpRequests,
       totalWsMessages: this.totalWsMessages,
@@ -803,6 +819,9 @@ class ResourceMonitorService {
     this.lastWsMessageAt = null;
     this.lastHttpResponseAt = null;
     this.lastArduinoTimestamp = null;
+  this.lastArduinoTsMs = null;
+  this.lastIngestAtMs = null;
+  this.lastEmitAtMs = null;
     // align delta baselines to current cumulative counters
     this.lastHttpRequests = this.totalHttpRequests;
     this.lastWsMessages = this.totalWsMessages;
