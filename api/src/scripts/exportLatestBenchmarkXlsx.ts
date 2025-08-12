@@ -76,7 +76,7 @@ async function main() {
       { header: '~Payload [B]', key: 'payload', width: 14 },
       { header: 'Jitter [ms]', key: 'jitter', width: 12 },
       { header: 'Staleness [ms]', key: 'fresh', width: 16 },
-      { header: 'ELU p99 [ms]', key: 'elp', width: 14 },
+  { header: 'EL delay p99 [ms]', key: 'elp', width: 14 },
       { header: 'CPU [%]', key: 'cpu', width: 10 },
       { header: 'RSS [MB]', key: 'rss', width: 10 },
       { header: 'n used/total', key: 'n', width: 12 },

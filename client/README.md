@@ -199,7 +199,7 @@ For step‑by‑step scenarios (Docker vs Bridge vs Local Dev) see the root `REA
 | WebSocket    | Default attempt on load                    | Low latency, push updates        | Requires stable socket path   |
 | HTTP Polling | Automatic fallback (e.g. connection error) | Works behind restrictive proxies | Higher latency, more overhead |
 
-Connection status indicators & retry logic (see `components/connection-status.tsx`) inform the user if the app is degraded.
+Connection status indicators & retry logic are handled by the WebSocket provider (`src/websocket/providers/websocket-provider.tsx`) and surfaced in UI components.
 
 ### Live emit toggle (test mode)
 

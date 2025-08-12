@@ -10,7 +10,7 @@ Celem jest porównanie dwóch metod dostarczania danych telemetrycznych do klien
 
 3) H3 — Stabilność interwałów: Jitter [ms] (odchylenie standardowe odstępów) jest niższy dla WS (kontrolowany driver) niż dla HTTP (timery + kolejki event loop).
 
-4) H4 — Koszt zasobów: Narzut CPU i ELU p99 rośnie wraz z Hz i liczbą klientów. Do 2 Hz obie metody mieszczą się w akceptowalnym zakresie dla pojedynczej instancji API.
+4) H4 — Koszt zasobów: Narzut CPU i EL delay p99 rośnie wraz z Hz i liczbą klientów. Do 2 Hz obie metody mieszczą się w akceptowalnym zakresie dla pojedynczej instancji API.
 
 5) H5 — Skalowalność po klientach: Wzrost liczby klientów zwiększa koszt CPU i I/O szybciej dla HTTP (koszt request/response per klient) niż dla WS (broadcast). 
 
@@ -18,7 +18,7 @@ Celem jest porównanie dwóch metod dostarczania danych telemetrycznych do klien
 
 - Rate [/s], Bytes/s, ~Payload [B]
 - Jitter [ms], Staleness [ms]
-- ELU p99 [ms], CPU [%], RSS [MB]
+- EL delay p99 [ms], CPU [%], RSS [MB]
 - Wiarygodność: n(used) ≥ 10, względny CI95 < 30% (dla krótkich przebiegów)
 
 ## Uwagi metodologiczne

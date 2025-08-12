@@ -26,6 +26,7 @@
     "research:quick": "ts-node -r tsconfig-paths/register ./src/scripts/researchCli.ts quick && npm run -s docs:research:update && npm run -s validate:auto",
     "research:safe": "ts-node -r tsconfig-paths/register ./src/scripts/researchCli.ts safe && npm run -s docs:research:update && npm run -s validate:auto",
     "research:robust": "ts-node -r tsconfig-paths/register ./src/scripts/researchCli.ts robust && npm run -s docs:research:update && npm run -s validate:auto",
+    "research:full": "ts-node -r tsconfig-paths/register ./src/scripts/researchCli.ts robust && npm run -s docs:research:update && npm run -s validate:auto",
     "research:clients": "ts-node -r tsconfig-paths/register ./src/scripts/researchCli.ts clients && npm run -s docs:research:update && npm run -s validate:auto",
     "research:matrix": "pwsh -NoProfile -File ./tools/orchestrate-benchmarks.ps1",
     "research:matrix:custom": "pwsh -NoProfile -File ./tools/orchestrate-benchmarks.ps1",

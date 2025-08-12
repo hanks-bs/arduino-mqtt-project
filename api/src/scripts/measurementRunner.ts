@@ -66,13 +66,14 @@ async function runHttpSimulated(cfg: RunCfg): Promise<SessionRecord> {
   const { label, hz, durationSec, payloadBytes, loadCpuPct, loadWorkers } = cfg;
   const periodMs = Math.max(50, Math.round(1000 / Math.max(0.001, hz)));
   // Upewnij się, że synthetic HTTP użyje żądanego payloadu (spójność z etykietą)
-  try { ResourceMonitor.noteArduinoPayloadSize(payloadBytes); } catch {}
+  try {
+    ResourceMonitor.noteArduinoPayloadSize(payloadBytes);
+  } catch {}
   // W trybie standalone nie ma działającego serwera HTTP, więc korzystamy z syntetycznych ticków.
   // Jeśli liczba klientów nie została ustawiona (undefined), przyjmij 1, aby wymusić aktywność.
   // Jeżeli użytkownik jawnie poda 0, zachowujemy 0 (brak aktywności dla parowania scenariuszy z WS=0).
-  const clients = (cfg.clientsHttp == null)
-    ? 1
-    : Math.max(0, Math.floor(cfg.clientsHttp));
+  const clients =
+    cfg.clientsHttp == null ? 1 : Math.max(0, Math.floor(cfg.clientsHttp));
   const rec = ResourceMonitor.startSession({
     label,
     mode: 'polling',
@@ -191,7 +192,7 @@ function summarizeSession(s: SessionRecord) {
   // Fallback Poissona dla rzadkich zdarzeń (stabilizuje CI przy bardzo małych średnich)
   const eventsApprox = Math.max(0, Math.round(totalMsgsApprox));
   const ci95RatePois =
-    dtSum > 0 ? 1.96 * Math.sqrt(Math.max(1, eventsApprox)) / dtSum : 0;
+    dtSum > 0 ? (1.96 * Math.sqrt(Math.max(1, eventsApprox))) / dtSum : 0;
   const ci95BytesPois = ci95RatePois * (avgPayload || 0);
   const usePoisson = avgRate < 0.5 || eventsApprox < 30;
   const ci95Rate = usePoisson ? ci95RatePois : ci95RateStd;
@@ -263,8 +264,8 @@ function summarizeSession(s: SessionRecord) {
   return {
     id: s.id,
     label: s.config.label,
-  repIndex: (s as any).repIndex || 1,
-  repTotal: (s as any).repTotal || 1,
+    repIndex: (s as any).repIndex || 1,
+    repTotal: (s as any).repTotal || 1,
     mode: s.config.mode,
     clientsHttp: s.config.mode === 'polling' ? (s.config.clientsHttp ?? 0) : 0,
     clientsWs: s.config.mode === 'ws' ? (s.config.clientsWs ?? 0) : 0,
@@ -274,22 +275,22 @@ function summarizeSession(s: SessionRecord) {
     nTotal: s.samples.length,
     warmupSec: s.config.warmupSec || 0,
     cooldownSec: s.config.cooldownSec || 0,
-  // sanity clamp to avoid negative artifacts from sampler
-  avgCpu: Math.max(0, sum.cpu / n),
-  avgRss: Math.max(0, sum.rss / n),
+    // sanity clamp to avoid negative artifacts from sampler
+    avgCpu: Math.max(0, sum.cpu / n),
+    avgRss: Math.max(0, sum.rss / n),
     avgElu: sum.elu / n,
     avgDelayP99: sum.p99 / n,
     avgRate,
     rateMedian,
     rateTrimmed,
     rateStd,
-  ci95Rate,
+    ci95Rate,
     relCiRate,
     avgBytesRate,
     bytesMedian,
     bytesTrimmed,
     bytesStd,
-  ci95Bytes,
+    ci95Bytes,
     relCiBytes,
     avgPayload,
     bytesPerUnit,
@@ -398,7 +399,8 @@ function aggregateByClients(summaries: Summary[]) {
       s.mode === 'ws'
         ? parseClientsFromLabel((s as any).label || s.label, 'cWs')
         : parseClientsFromLabel((s as any).label || s.label, 'cHttp');
-    const clients = Number.isFinite(explicit) && explicit > 0 ? explicit : parsed;
+    const clients =
+      Number.isFinite(explicit) && explicit > 0 ? explicit : parsed;
     const key = `${s.mode}|${clients}`;
     const cur = acc.get(key) || {
       mode: s.mode,
@@ -509,7 +511,7 @@ function exportCsv(sessions: SessionRecord[], outFile: string) {
 }
 
 function evaluate(summaries: ReturnType<typeof summarizeSession>[]) {
-  // Basic heuristics/thresholds for sanity checks
+  // Basic heuristics/thresholds for quick verification
   const tolRate = 0.5; // ±50%
   const tolPayload = 0.5; // ±50%
 
@@ -549,8 +551,10 @@ function evaluate(summaries: ReturnType<typeof summarizeSession>[]) {
       }
     }
     if (expectedPayload != null) {
-      const clientsHttp0 = Math.max(0, Number((s as any).clientsHttp ?? 0)) === 0;
-      const noActivity = (s.avgRate || 0) === 0 || (s.mode === 'polling' && clientsHttp0);
+      const clientsHttp0 =
+        Math.max(0, Number((s as any).clientsHttp ?? 0)) === 0;
+      const noActivity =
+        (s.avgRate || 0) === 0 || (s.mode === 'polling' && clientsHttp0);
       if (!noActivity) {
         const low = expectedPayload * (1 - tolPayload);
         const high = expectedPayload * (1 + tolPayload);
@@ -779,9 +783,9 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
       console.log(
         `[Measure] Finished ${r.label} [rep ${i + 1}/${repeats}] (samples=${sess.samples.length})`,
       );
-  // Zachowaj metadane powtórzenia przy sesji, by trafiły do summary.json i raportu
-  (sess as any).repIndex = i + 1;
-  (sess as any).repTotal = repeats;
+      // Zachowaj metadane powtórzenia przy sesji, by trafiły do summary.json i raportu
+      (sess as any).repIndex = i + 1;
+      (sess as any).repTotal = repeats;
       sessions.push(sess);
       await sleep(300); // small separation between reps
     }
@@ -793,6 +797,27 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
   const evaluated = evaluate(summaries);
   const byLoad = aggregateByLoad(evaluated as any);
   const byClients = aggregateByClients(evaluated as any);
+  // Normalized per-client aggregation (skip clients<=0)
+  const byClientsNorm = byClients
+    .filter(r => Number.isFinite((r as any).clients) && (r as any).clients > 0)
+    .map(r => {
+      const c = (r as any).clients as number;
+      return {
+        mode: r.mode,
+        clients: c,
+  // WS: broadcast — per-client rate == emission rate; HTTP: per-client rate == total rate / N
+  ratePerClient: r.mode === 'ws' ? r.avgRate : r.avgRate / c,
+  // Bytes/s: w pomiarach WS bytesRate odnosi się do jednej emisji (nie jest sumą po klientach), więc na klienta == avgBytesRate;
+  // w HTTP bytesRate skaluje się z N, więc dzielimy przez liczbę klientów
+  bytesPerClient: r.mode === 'ws' ? r.avgBytesRate : r.avgBytesRate / c,
+        avgPayload: r.avgPayload, // payload na zdarzenie nie zależy od N
+        avgJitterMs: r.avgJitterMs,
+        avgDelayP99: r.avgDelayP99,
+        avgFreshnessMs: r.avgFreshnessMs,
+        cpuPerClient: r.avgCpu / c,
+        rssPerClient: r.avgRss / c,
+      };
+    });
 
   const fairPayloadFlag = wsPayload === httpPayload;
   const ratios = evaluated
@@ -868,12 +893,30 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
   }
   const combinedByLoad = aggregateByLoad(combinedEvaluated as any);
   const combinedByClients = aggregateByClients(combinedEvaluated as any);
+  const combinedByClientsNorm = combinedByClients
+    .filter(r => Number.isFinite((r as any).clients) && (r as any).clients > 0)
+    .map(r => {
+      const c = (r as any).clients as number;
+      return {
+        mode: r.mode,
+        clients: c,
+  ratePerClient: r.mode === 'ws' ? r.avgRate : r.avgRate / c,
+  bytesPerClient: r.mode === 'ws' ? r.avgBytesRate : r.avgBytesRate / c,
+        avgPayload: r.avgPayload,
+        avgJitterMs: r.avgJitterMs,
+        avgDelayP99: r.avgDelayP99,
+        avgFreshnessMs: r.avgFreshnessMs,
+        cpuPerClient: r.avgCpu / c,
+        rssPerClient: r.avgRss / c,
+      };
+    });
   await fs.writeJSON(
     summaryPath,
     {
       summaries: combinedEvaluated,
       byLoad: combinedByLoad,
       byClients: combinedByClients,
+      byClientsNormalized: combinedByClientsNorm,
       flags,
       runConfig,
       units: {
@@ -937,6 +980,29 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
   const byClientsPath = path.join(outDir, 'by_clients.csv');
   await fs.writeFile(byClientsPath, byClientsCsv.join('\n'), 'utf8');
 
+  // Export by-clients NORMALIZED (per client) CSV
+  const byClientsNormCsv = [
+    'mode,clients,ratePerClient,bytesPerClient,avgPayload,avgJitterMs,avgDelayP99,avgFreshnessMs,cpuPerClient,rssPerClient',
+  ];
+  for (const r of byClientsNorm) {
+    byClientsNormCsv.push(
+      [
+        r.mode,
+        r.clients,
+        r.ratePerClient.toFixed(3),
+        r.bytesPerClient.toFixed(0),
+        r.avgPayload.toFixed(1),
+        r.avgJitterMs.toFixed(1),
+        r.avgDelayP99.toFixed(1),
+        r.avgFreshnessMs.toFixed(0),
+        r.cpuPerClient.toFixed(3),
+        r.rssPerClient.toFixed(3),
+      ].join(','),
+    );
+  }
+  const byClientsNormPath = path.join(outDir, 'by_clients_normalized.csv');
+  await fs.writeFile(byClientsNormPath, byClientsNormCsv.join('\n'), 'utf8');
+
   // Generate README.md with documentation and preliminary evaluation
   const readmePath = path.join(outDir, 'README.md');
   const readme = renderReadme(
@@ -948,8 +1014,9 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
       durationSec,
     },
     combinedByLoad,
-    combinedByClients,
+  combinedByClients,
     runConfig,
+  combinedByClientsNorm,
   );
   await fs.writeFile(readmePath, readme, 'utf8');
 
@@ -1035,10 +1102,10 @@ if (require.main === module) {
     payload: payloadArg ? Number(payloadArg) : undefined,
     payloadWs: payloadWsArg ? Number(payloadWsArg) : undefined,
     payloadHttp: payloadHttpArg ? Number(payloadHttpArg) : undefined,
-  // Extended flags (not documented in scripts):
-  // --disablePidusage (boolean), --cpuSampleMs <ms>
-  ...(disablePidArg ? { disablePidusage: true } : {}),
-  ...(cpuSampleArg ? { cpuSampleMs: Number(cpuSampleArg) } : {}),
+    // Extended flags (not documented in scripts):
+    // --disablePidusage (boolean), --cpuSampleMs <ms>
+    ...(disablePidArg ? { disablePidusage: true } : {}),
+    ...(cpuSampleArg ? { cpuSampleMs: Number(cpuSampleArg) } : {}),
     pair: pairFlag,
   };
 
@@ -1073,6 +1140,18 @@ function renderReadme(
     warmupSec: number;
     cooldownSec: number;
   },
+  byClientsNormalized: Array<{
+    mode: 'ws' | 'polling';
+    clients: number;
+    ratePerClient: number;
+    bytesPerClient: number;
+    avgPayload: number;
+    avgJitterMs: number;
+    avgDelayP99: number;
+    avgFreshnessMs: number;
+    cpuPerClient: number;
+    rssPerClient: number;
+  }>,
 ) {
   const tsName = path.basename(opts.outDir);
   const parseHz = (label: string): number => {
@@ -1164,7 +1243,7 @@ function renderReadme(
     })
     .join('\n');
 
-  const table = `| Label | Mode | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | Staleness [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] | n (used/total) | Rate OK | Payload OK |
+  const table = `| Label | Mode | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | Staleness [ms] | EL delay p99 [ms] | CPU [%] | RSS [MB] | n (used/total) | Rate OK | Payload OK |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|:--:|:--:|:--:|
 ${rows}`;
 
@@ -1224,6 +1303,7 @@ Ten folder zawiera surowe próbki (CSV) oraz podsumowanie z wstępną oceną.
  - Podsumowanie JSON: ./${opts.summaryFile}
  - Uśrednione wyniki wg obciążenia: ./by_load.csv
  - Uśrednione wyniki wg liczby klientów: ./by_clients.csv
+ - Znormalizowane na klienta: ./by_clients_normalized.csv
 
 ## Podsumowanie (średnie)
 
@@ -1274,6 +1354,12 @@ Poniżej zestawiono średnie metryki zagregowane per metoda i liczba klientów s
 
 ${renderByClientsTables(byClients)}
 
+## Porównanie wg liczby klientów — znormalizowane na klienta
+
+Poniżej te same scenariusze, ale wszystkie metryki przeliczone „na jednego klienta”. To ułatwia fair porównanie WS vs HTTP przy różnych N.
+
+${renderByClientsNormTables(byClientsNormalized)}
+
 ## Wnioski (syntetyczne)
 
 ${evaluated.map(s => `- ${s.label}: ${s.checks.join('; ')}`).join('\n')}
@@ -1283,13 +1369,13 @@ ${evaluated.map(s => `- ${s.label}: ${s.checks.join('; ')}`).join('\n')}
 - Sesje są izolowane: resetCounters=true (liczniki) oraz reset rolling (jitter, EL delay, ELU baseline) na starcie.
 - Agregacja uwzględnia trimming warmup/cooldown (jeśli ustawione), co stabilizuje średnie.
 - Podajemy n (użyte/łącznie), 95% CI i tickMs, by pokazać niepewność estymacji i odstępy próbkowania.
- - Flagi sesji: fairPayload=${fairPayload}, sourceLimited=${sourceLimited}
+ - Flagi sesji: ładunek zgodny=${fairPayload ? 'TAK' : 'NIE'}, ograniczenie źródłem=${sourceLimited ? 'TAK' : 'NIE'}
 `;
 }
 
 function renderByLoadTables(rows: ReturnType<typeof aggregateByLoad>) {
   const fmt = (n: number, f = 1) => n.toFixed(f);
-  const header = `| Obciążenie | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] |
+  const header = `| Obciążenie | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | EL delay p99 [ms] | CPU [%] | RSS [MB] |
 |---:|---:|---:|---:|---:|---:|---:|---:|`;
   const render = (mode: 'ws' | 'polling') => {
     const modeRows = rows.filter(r => r.mode === mode);
@@ -1312,7 +1398,7 @@ ${render('polling')}`;
 
 function renderByClientsTables(rows: ReturnType<typeof aggregateByClients>) {
   const fmt = (n: number, f = 1) => n.toFixed(f);
-  const header = `| Klienci | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] |
+  const header = `| Klienci | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | EL delay p99 [ms] | CPU [%] | RSS [MB] |
 |---:|---:|---:|---:|---:|---:|---:|---:|`;
   const render = (mode: 'ws' | 'polling') => {
     const modeRows = rows.filter(r => r.mode === mode);
@@ -1320,6 +1406,40 @@ function renderByClientsTables(rows: ReturnType<typeof aggregateByClients>) {
       .map(
         r =>
           `| ${r.clients} | ${fmt(r.avgRate, 2)} | ${fmt(r.avgBytesRate, 0)} | ${fmt(r.avgPayload, 0)} | ${fmt(r.avgJitterMs, 1)} | ${fmt(r.avgDelayP99, 1)} | ${fmt(r.avgCpu, 1)} | ${fmt(r.avgRss, 1)} |`,
+      )
+      .join('\n');
+    const title = mode === 'ws' ? 'WebSocket' : 'HTTP polling';
+    return `### ${title}
+
+${header}
+${lines}
+`;
+  };
+  return `${render('ws')}
+${render('polling')}`;
+}
+
+function renderByClientsNormTables(rows: Array<{
+  mode: 'ws' | 'polling';
+  clients: number;
+  ratePerClient: number;
+  bytesPerClient: number;
+  avgPayload: number;
+  avgJitterMs: number;
+  avgDelayP99: number;
+  avgFreshnessMs: number;
+  cpuPerClient: number;
+  rssPerClient: number;
+}>) {
+  const fmt = (n: number, f = 1) => n.toFixed(f);
+  const header = `| Klienci | Rate/klient [/s] | Bytes/klient [B/s] | ~Payload [B] | Jitter [ms] | EL delay p99 [ms] | CPU/klient [%] | RSS/klient [MB] |
+|---:|---:|---:|---:|---:|---:|---:|---:|`;
+  const render = (mode: 'ws' | 'polling') => {
+    const modeRows = rows.filter(r => r.mode === mode);
+    const lines = modeRows
+      .map(
+        r =>
+          `| ${r.clients} | ${fmt(r.ratePerClient, 3)} | ${fmt(r.bytesPerClient, 0)} | ${fmt(r.avgPayload, 0)} | ${fmt(r.avgJitterMs, 1)} | ${fmt(r.avgDelayP99, 1)} | ${fmt(r.cpuPerClient, 3)} | ${fmt(r.rssPerClient, 3)} |`,
       )
       .join('\n');
     const title = mode === 'ws' ? 'WebSocket' : 'HTTP polling';

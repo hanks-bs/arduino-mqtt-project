@@ -17,7 +17,7 @@ type Preset =
 
 function printHelp() {
   const presets: Array<[Preset, string]> = [
-    ['sanity', '12s, 1 Hz, clients=1/1, pidusage disabled (szybki sanity check)'],
+  ['sanity', '12s, 1 Hz, clients=1/1, pidusage disabled (szybka weryfikacja)'],
     ['stable', '20s×2, 1 Hz, clients=1/1, cpuSampleMs=1000 (stabilny baseline)'],
     ['stable60', '60s×2, 1 Hz, clients=1/1, cpuSampleMs=1000 (ciasne CI)'],
     ['quick', '4s, 1–2 Hz, bez obciążenia (ekspresowy podgląd)'],

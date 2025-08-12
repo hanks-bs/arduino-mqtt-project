@@ -79,6 +79,8 @@ async function main() {
       };
   const byLoad: Array<any> = (summary.byLoad || []) as Array<any>;
   const byClients: Array<any> = (summary.byClients || []) as Array<any>;
+  const byClientsNormalized: Array<any> =
+    (summary.byClientsNormalized || []) as Array<any>;
   const flags = (summary.flags || {}) as {
     fairPayload?: boolean;
     sourceLimited?: boolean;
@@ -116,7 +118,7 @@ async function main() {
   const sourceLimited = flags.sourceLimited === true;
 
   // Build table header aligned with generated rows (includes nUsed/nTotal)
-  const header = `| Label | Mode | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | Staleness [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] | n (used/total) | Rate OK | Payload OK |
+  const header = `| Label | Mode | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | Staleness [ms] | EL delay p99 [ms] | CPU [%] | RSS [MB] | n (used/total) | Rate OK | Payload OK |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|:--:|:--:|:--:|`;
   const rows = items
     .map(s => {
@@ -147,7 +149,7 @@ async function main() {
 
 ${statusBar}
 
-Pliki: [sessions.csv](../api/benchmarks/${latest}/sessions.csv), [summary.json](../api/benchmarks/${latest}/summary.json), [README](../api/benchmarks/${latest}/README.md)
+Pliki: [sessions.csv](../api/benchmarks/${latest}/sessions.csv), [summary.json](../api/benchmarks/${latest}/summary.json), [by_load.csv](../api/benchmarks/${latest}/by_load.csv), [by_clients.csv](../api/benchmarks/${latest}/by_clients.csv), [by_clients_normalized.csv](../api/benchmarks/${latest}/by_clients_normalized.csv), [README](../api/benchmarks/${latest}/README.md)
 
 Uwaga: tabele uporządkowane wg: Mode (WS, HTTP) → Hz → Obciążenie → Klienci.
 ${isSafeRun ? '\nUwaga (SAFE): krótki przebieg 0.5–1 Hz bez obciążenia; walidacja odchyleń Rate oznaczana jako WARN (nie FAIL), by unikać fałszywych negatywów przy małym n.' : ''}${sourceNote}${clientsZeroNote}
@@ -160,6 +162,8 @@ ${renderRunConfig(runCfg)}
 ${renderByLoadSection(byLoad)}
 
 ${renderByClientsSection(byClients)}
+
+${renderByClientsNormSection(byClientsNormalized)}
 
 ${renderMetrology(items, runCfg?.monitorTickMs)}
 ${renderMetrologyGuide()}
@@ -277,7 +281,7 @@ function renderByLoadSection(byLoad: Array<any>): string {
   if (!byLoad || byLoad.length === 0) return '';
   const ws = byLoad.filter(r => r.mode === 'ws');
   const http = byLoad.filter(r => r.mode === 'polling');
-  const header = `| Obciążenie | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] |
+  const header = `| Obciążenie | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | EL delay p99 [ms] | CPU [%] | RSS [MB] |
 |---:|---:|---:|---:|---:|---:|---:|---:|`;
   const mk = (rows: any[]) =>
     rows
@@ -335,7 +339,7 @@ function renderByClientsSection(byClients: Array<any>): string {
   if (!byClients || byClients.length === 0) return '';
   const ws = byClients.filter(r => r.mode === 'ws');
   const http = byClients.filter(r => r.mode === 'polling');
-  const header = `| Klienci | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] |
+  const header = `| Klienci | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | EL delay p99 [ms] | CPU [%] | RSS [MB] |
 |---:|---:|---:|---:|---:|---:|---:|---:|`;
   const mk = (rows: any[]) =>
     rows
@@ -352,6 +356,29 @@ function renderByClientsSection(byClients: Array<any>): string {
     ? `### Zestawienie wg liczby klientów — HTTP polling\n\n${header}\n${mk(http)}\n\n`
     : '';
   return `\n\n## Uśrednione wyniki wg liczby klientów\n\nUwaga: "Liczba klientów" to liczba równoległych syntetycznych klientów generowanych wewnętrznie na czas sesji (HTTP: liczbę timerów; WS: efektywną sumaryczną częstość).\n\n${wsTbl}${httpTbl}`;
+}
+
+function renderByClientsNormSection(rows: Array<any>): string {
+  if (!rows || rows.length === 0) return '';
+  const ws = rows.filter(r => r.mode === 'ws');
+  const http = rows.filter(r => r.mode === 'polling');
+  const header = `| Klienci | Rate/klient [/s] | Bytes/klient [B/s] | ~Payload [B] | Jitter [ms] | EL delay p99 [ms] | CPU/klient [%] | RSS/klient [MB] |
+|---:|---:|---:|---:|---:|---:|---:|---:|`;
+  const mk = (rs: any[]) =>
+    rs
+      .sort((a, b) => (a.clients ?? 0) - (b.clients ?? 0))
+      .map(
+        r =>
+          `| ${r.clients ?? 0} | ${nf(r.ratePerClient, 3)} | ${nf(r.bytesPerClient, 0)} | ${nf(r.avgPayload, 0)} | ${nf(r.avgJitterMs, 1)} | ${nf(r.avgDelayP99, 1)} | ${nf(r.cpuPerClient, 3)} | ${nf(r.rssPerClient, 3)} |`,
+      )
+      .join('\n');
+  const wsTbl = ws.length
+    ? `### Zestawienie wg liczby klientów — znormalizowane (WebSocket)\n\n${header}\n${mk(ws)}\n\n`
+    : '';
+  const httpTbl = http.length
+    ? `### Zestawienie wg liczby klientów — znormalizowane (HTTP polling)\n\n${header}\n${mk(http)}\n\n`
+    : '';
+  return `\n\n## Znormalizowane na klienta — wyniki wg liczby klientów\n\nPoniżej metryki przeliczone na jednego klienta. Dla WS (broadcast) tempo na klienta odpowiada tempie emisji; dla HTTP (pull) tempo na klienta ≈ 1 Hz przy Hz=1 i rośnie liniowo wraz z konfiguracją.\n\n${wsTbl}${httpTbl}`;
 }
 
 function renderConclusions(items: Array<any>): string {
@@ -471,7 +498,7 @@ function renderWinners(
 }
 
 function renderMetrologyGuide(): string {
-  return `\n\n### Metrologia — jak czytać i co oznaczają wyniki\n\n- n (used/total): liczba próbek wykorzystanych w średnich po trimowaniu vs. całkowita. Zalecane n(used) ≥ 10.\n- Rate [/s] i CI95 Rate: średnia częstość i 95% przedział ufności (mniejszy CI → stabilniejsze wyniki).\n  - Praktyczne kryterium: CI95/średnia < 30% uznajemy za stabilne dla krótkich przebiegów.\n- CI95/avg: względna szerokość przedziału ufności (niższy lepszy).\n- σ(rate): odchylenie standardowe — informuje o zmienności częstości między próbkami.\n- Median Rate/Bytes: mediana — odporna na wartości odstające.\n- Bytes/s i CI95 Bytes: przepływność i jej niepewność. Dla stałego payloadu oczekujemy Bytes/s ≈ Rate × Payload.\n- Tick [ms]: okres próbkowania monitoringu (\`MONITOR_TICK_MS\`). Domyślnie 1000 ms w aplikacji; w badaniach zwykle 200–250 ms.\n- Wpływ warmup/cooldown: odcięcie początkowych/końcowych odcinków stabilizuje średnie i zwęża CI.\n- Minimalne kryteria wiarygodności (propozycja):\n  - n(used) ≥ 10, CI95/średnia (Rate) < 30%, CI95/średnia (Bytes/s) < 30%.\n  - Relacja Bytes≈Rate×Payload: błąd względny < 30% dla przebiegów kontrolowanych.\n`;
+  return `\n\n### Metrologia — jak czytać i co oznaczają wyniki\n\n- n (used/total): liczba próbek wykorzystanych w średnich po trimowaniu vs. całkowita. Zalecane n(used) ≥ 10.\n- Rate [/s] i CI95 Rate: średnia częstość i 95% przedział ufności (mniejszy CI → stabilniejsze wyniki).\n  - Jak liczymy CI95: domyślnie 1.96·SE (z odchylenia standardowego); dla rzadkich zdarzeń (średnia < 0.5/s lub < 30 zdarzeń) fallback Poissona. CI95 Bytes/s ≈ CI95(rate) × ~Payload.\n  - Praktyczne kryterium: CI95/średnia < 30% uznajemy za stabilne dla krótkich przebiegów.\n- CI95/avg: względna szerokość przedziału ufności (niższy lepszy).\n- σ(rate): odchylenie standardowe — informuje o zmienności częstości między próbkami.\n- Median Rate/Bytes: mediana — odporna na wartości odstające.\n- Bytes/s i CI95 Bytes: przepływność i jej niepewność. Dla stałego payloadu oczekujemy Bytes/s ≈ Rate × Payload.\n- Tick [ms]: okres próbkowania monitoringu (\`MONITOR_TICK_MS\`). Domyślnie 1000 ms w aplikacji; w badaniach zwykle 200–250 ms.\n- Wpływ warmup/cooldown: odcięcie początkowych/końcowych odcinków stabilizuje średnie i zwęża CI.\n- Minimalne kryteria wiarygodności (propozycja):\n  - n(used) ≥ 10, CI95/średnia (Rate) < 30%, CI95/średnia (Bytes/s) < 30%.\n  - Relacja Bytes≈Rate×Payload: błąd względny < 30% dla przebiegów kontrolowanych.\n`;
 }
 
 // Visual comparison helpers
@@ -559,7 +586,7 @@ function renderConclusionsVisual(
   if (byLoad && byLoad.length >= 2) {
     parts.push('\n\n### Wnioski — porównanie WS vs HTTP wg obciążenia');
     parts.push(
-      '\n\n| Obciążenie [%] | Rate WS [/s] | Rate HTTP [/s] | Jitter WS [ms] | Jitter HTTP [ms] | Staleness WS [ms] | Staleness HTTP [ms] | ELU p99 WS [ms] | ELU p99 HTTP [ms] | CPU WS [%] | CPU HTTP [%] | RSS WS [MB] | RSS HTTP [MB] |',
+      '\n\n| Obciążenie [%] | Rate WS [/s] | Rate HTTP [/s] | Jitter WS [ms] | Jitter HTTP [ms] | Staleness WS [ms] | Staleness HTTP [ms] | EL delay p99 WS [ms] | EL delay p99 HTTP [ms] | CPU WS [%] | CPU HTTP [%] | RSS WS [MB] | RSS HTTP [MB] |',
     );
     parts.push(
       '|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
@@ -569,7 +596,7 @@ function renderConclusionsVisual(
   if (byClients && byClients.length >= 2) {
     parts.push('\n\n### Wnioski — porównanie WS vs HTTP wg liczby klientów');
     parts.push(
-      '\n\n| Klienci | Rate WS [/s] | Rate HTTP [/s] | Jitter WS [ms] | Jitter HTTP [ms] | Staleness WS [ms] | Staleness HTTP [ms] | ELU p99 WS [ms] | ELU p99 HTTP [ms] | CPU WS [%] | CPU HTTP [%] | RSS WS [MB] | RSS HTTP [MB] |',
+      '\n\n| Klienci | Rate WS [/s] | Rate HTTP [/s] | Jitter WS [ms] | Jitter HTTP [ms] | Staleness WS [ms] | Staleness HTTP [ms] | EL delay p99 WS [ms] | EL delay p99 HTTP [ms] | CPU WS [%] | CPU HTTP [%] | RSS WS [MB] | RSS HTTP [MB] |',
     );
     parts.push(
       '|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|',

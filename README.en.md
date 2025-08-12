@@ -142,6 +142,29 @@ WebSocket events:
 - arduinoData — latest composite dataset (JSON string)
 - metrics — LiveMetrics object (per-second)
 
+CSV columns (sessions.csv — quick reference):
+
+- sessionId — session identifier
+- label — human label (e.g., "WS@1Hz payload=360B cWs=10")
+- mode — `ws` or `polling`
+- startedAt, finishedAt — session timestamps
+- sampleIndex — sample index within session (1..N)
+- ts — sample timestamp (ISO)
+- cpu — Node.js process CPU load [%]
+- rssMB — resident set size [MB]
+- heapUsedMB — heap usage [MB]
+- elu — Event Loop Utilization (0..1)
+- elDelayP99Ms — event‑loop delay p99 [ms]
+- httpReqRate, wsMsgRate — request/message rates [/s]
+- httpBytesRate, wsBytesRate — throughput [B/s]
+- httpAvgBytesPerReq, wsAvgBytesPerMsg — average payload [B]
+- httpJitterMs, wsJitterMs — inter‑arrival jitter [ms]
+- tickMs — actual monitor sampling interval [ms]
+- dataFreshnessMs — staleness (ms since last Arduino timestamp)
+- sourceTsMs — source timestamp from device (ms) if available
+- ingestTsMs — backend ingestion time (ms)
+- emitTsMs — emission time to client (ms)
+
 ---
 
 ## Live metrics (per second)
@@ -191,7 +214,9 @@ The API provides a complete measurement pipeline, export, and auto‑update of t
   - Stable sanity: `npm run research:sanity` (WS+HTTP @1 Hz, 12 s, pidusage disabled)
 - Artifacts per run:
   - `sessions.csv` — flattened per‑second samples for WS and HTTP
-  - `summary.json` — aggregates (averages, ELU p99, jitter, staleness)
+  - `summary.json` — summary metrics (averages, EL delay p99, jitter, staleness)
+  - `by_load.csv`, `by_clients.csv` — averages by CPU load and by number of clients
+  - `by_clients_normalized.csv` — metrics normalized per client
   - `README.md` — human‑readable summary mapped to the dashboard
 - Update the research document with the latest results (auto section in `docs/ASPEKT_BADAWCZY.md`):
   - `yarn docs:research:update` (from `api/`)
