@@ -51,6 +51,10 @@ async function main() {
   const sumPath = path.join(latestDir, 'summary.json');
   const summary = await fs.readJSON(sumPath);
   const items: Item[] = summary.summaries || [];
+  const flags = (summary.flags || {}) as {
+    fairPayload?: boolean;
+    sourceLimited?: boolean;
+  };
 
   // Detect a "SAFE" run to avoid hard FAIL on expected short-run deviations.
   // Praktyczne kryterium: hzSet ⊆ {0.5,1}, loadSet ⊆ {0}, clientsHttp=0, clientsWs=0, durationSec ≤ 6, monitorTickMs ≥ 500
@@ -78,6 +82,17 @@ async function main() {
   const warn: string[] = [];
   const fail: string[] = [];
 
+  const sourceLimited = Boolean(flags.sourceLimited);
+  const fairPayload =
+    typeof flags.fairPayload === 'boolean'
+      ? flags.fairPayload
+      : rc.wsPayload === rc.httpPayload;
+  if (!fairPayload) {
+    fail.push(
+      `Unfair payload: wsPayload=${rc.wsPayload}B, httpPayload=${rc.httpPayload}B`,
+    );
+  }
+
   // Validation mode for Rate checks: absolute (default), relative (ignore absolute Hz, focus on payload/CI), or auto (downgrade to WARN when source-limited is detected)
   const mode = String(process.env.VALIDATE_RATE_MODE || 'absolute')
     .toLowerCase()
@@ -103,9 +118,9 @@ async function main() {
   })();
 
   // thresholds
-  const minSamples = 3; // minimal nUsed for believable mean
-  const maxRelCiRate = 2.0; // szerokie CI do 200% średniej akceptowalne przy krótkich przebiegach/wysokim jitterze
-  const maxRelCiBytes = 2.0;
+  const minSamples = 10; // minimal nUsed for believable mean
+  const durationSec = Number(rc.durationSec ?? 0);
+  const ciThresh = durationSec >= 60 ? 0.3 : 0.6;
 
   // helpers
   const parseIntSafe = (v: any): number | undefined => {
@@ -144,14 +159,14 @@ async function main() {
     // CI widths
     if (s.avgRate > 0 && Number.isFinite(s.ci95Rate)) {
       const rel = (s.ci95Rate || 0) / s.avgRate;
-      if (rel > maxRelCiRate)
+      if (rel > ciThresh)
         warn.push(
           `${s.label}: szeroki CI Rate (±${(rel * 100).toFixed(0)}% średniej)`,
         );
     }
     if (s.avgBytesRate > 0 && Number.isFinite(s.ci95Bytes)) {
       const rel = (s.ci95Bytes || 0) / s.avgBytesRate;
-      if (rel > maxRelCiBytes)
+      if (rel > ciThresh)
         warn.push(
           `${s.label}: szeroki CI Bytes/s (±${(rel * 100).toFixed(0)}% średniej)`,
         );
@@ -173,7 +188,7 @@ async function main() {
         const high = expectedRateScaled * (1 + s.tolRate);
         if (!(s.avgRate >= low && s.avgRate <= high)) {
           const msg = `${s.label}: Rate poza oczekiwaniem [${low.toFixed(2)}, ${high.toFixed(2)}], avg=${s.avgRate.toFixed(2)} (c=${clients})`;
-          if (isSafeRun || rateIssuesAsWarn) warn.push(msg);
+          if (isSafeRun || rateIssuesAsWarn || sourceLimited) warn.push(msg);
           else fail.push(msg);
         }
       }

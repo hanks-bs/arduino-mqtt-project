@@ -75,6 +75,10 @@ async function main() {
       };
   const byLoad: Array<any> = (summary.byLoad || []) as Array<any>;
   const byClients: Array<any> = (summary.byClients || []) as Array<any>;
+  const flags = (summary.flags || {}) as {
+    fairPayload?: boolean;
+    sourceLimited?: boolean;
+  };
 
   // Detect SAFE run for contextual note
   const isSafeRun = (() => {
@@ -101,6 +105,12 @@ async function main() {
     }
   })();
 
+  const fairPayload =
+    typeof flags.fairPayload === 'boolean'
+      ? flags.fairPayload
+      : runCfg?.wsPayload === runCfg?.httpPayload;
+  const sourceLimited = flags.sourceLimited === true;
+
   // Build table header aligned with generated rows (includes nUsed/nTotal)
   const header = `| Label | Mode | Rate [/s] | Bytes/s | ~Payload [B] | Jitter [ms] | Staleness [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] | n (used/total) | Rate OK | Payload OK |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|:--:|:--:|:--:|`;
@@ -122,12 +132,18 @@ async function main() {
     )
     .join('\n');
 
+  const statusBar = `Status: fair payload: ${fairPayload ? 'TAK' : 'NIE'}, source-limited: ${sourceLimited ? 'TAK' : 'NIE'}, czas: ${runCfg?.durationSec ?? '—'}s, tick: ${runCfg?.monitorTickMs ?? '—'} ms, repeats: ${runCfg?.repeats ?? '—'}`;
+  const sourceNote = sourceLimited
+    ? '\nUwaga: Etykiety @Hz odnoszą się do tempa transportu, ale run ograniczony przez źródło; różnice WS vs HTTP w Rate nie są miarodajne.'
+    : '';
   const block = `Ostatni run: ${latest}
+
+${statusBar}
 
 Pliki: [sessions.csv](../api/benchmarks/${latest}/sessions.csv), [summary.json](../api/benchmarks/${latest}/summary.json), [README](../api/benchmarks/${latest}/README.md)
 
 Uwaga: tabele uporządkowane wg: Mode (WS, HTTP) → Hz → Obciążenie → Klienci.
-${isSafeRun ? '\nUwaga (SAFE): krótki przebieg 0.5–1 Hz bez obciążenia; walidacja odchyleń Rate oznaczana jako WARN (nie FAIL), by unikać fałszywych negatywów przy małym n.' : ''}
+${isSafeRun ? '\nUwaga (SAFE): krótki przebieg 0.5–1 Hz bez obciążenia; walidacja odchyleń Rate oznaczana jako WARN (nie FAIL), by unikać fałszywych negatywów przy małym n.' : ''}${sourceNote}
 
 ${header}
 ${rows}
@@ -246,6 +262,7 @@ Parametry przyjęte w ostatnim runie:
 - Payloady: WS=${cfg.wsPayload}B, HTTP=${cfg.httpPayload}B
 - Klienci: clientsHttp=${cfg.clientsHttp}, clientsWs=${cfg.clientsWs}
 - Warmup/Cooldown [s]: ${cfg.warmupSec || 0} / ${cfg.cooldownSec || 0}
+- Repeats: ${cfg.repeats}
 `;
 }
 
@@ -279,8 +296,8 @@ function nf(n: any, frac = 1): string {
 
 function renderMetrology(items: Array<any>, tickMs?: number): string {
   if (!items || items.length === 0) return '';
-  const header = `| Label | n (used/total) | Rate [/s] | CI95 Rate | σ(rate) | Bytes/s | CI95 Bytes | σ(bytes) |
-|---|:--:|---:|---:|---:|---:|---:|---:|`;
+  const header = `| Label | n (used/total) | Rate [/s] | CI95 Rate | CI95/avg | σ(rate) | Median Rate | Bytes/s | CI95 Bytes | CI95/avg | σ(bytes) | Median Bytes |
+|---|:--:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|`;
   const rows = items
     .map(s => {
       const nUsed = (s.nUsed ?? s.count) as number;
@@ -289,7 +306,11 @@ function renderMetrology(items: Array<any>, tickMs?: number): string {
       const ciBytes = Number(s.ci95Bytes ?? 0);
       const rateStd = Number(s.rateStd ?? 0);
       const bytesStd = Number(s.bytesStd ?? 0);
-      return `| ${s.label} | ${nUsed}/${nTotal} | ${nf(s.avgRate, 2)} | ± ${nf(ciRate, 2)} | ${nf(rateStd, 2)} | ${nf(s.avgBytesRate, 0)} | ± ${nf(ciBytes, 0)} | ${nf(bytesStd, 0)} |`;
+      const relCiRate = Number(s.relCiRate ?? (ciRate && s.avgRate ? ciRate / s.avgRate : 0));
+      const relCiBytes = Number(
+        s.relCiBytes ?? (ciBytes && s.avgBytesRate ? ciBytes / s.avgBytesRate : 0),
+      );
+      return `| ${s.label} | ${nUsed}/${nTotal} | ${nf(s.avgRate, 2)} | ± ${nf(ciRate, 2)} | ${nf(relCiRate * 100, 0)}% | ${nf(rateStd, 2)} | ${nf(s.rateMedian, 2)} | ${nf(s.avgBytesRate, 0)} | ± ${nf(ciBytes, 0)} | ${nf(relCiBytes * 100, 0)}% | ${nf(bytesStd, 0)} | ${nf(s.bytesMedian, 0)} |`;
     })
     .join('\n');
 
@@ -429,7 +450,7 @@ function renderWinners(
 }
 
 function renderMetrologyGuide(): string {
-  return `\n\n### Metrologia — jak czytać i co oznaczają wyniki\n\n- n (used/total): liczba próbek wykorzystanych w średnich po trimowaniu vs. całkowita. Zalecane n(used) ≥ 10.\n- Rate [/s] i CI95 Rate: średnia częstość i 95% przedział ufności (mniejszy CI → stabilniejsze wyniki).\n  - Praktyczne kryterium: CI95/średnia < 30% uznajemy za stabilne dla krótkich przebiegów.\n- σ(rate): odchylenie standardowe — informuje o zmienności częstości między próbkami.\n- Bytes/s i CI95 Bytes: przepływność i jej niepewność. Dla stałego payloadu oczekujemy Bytes/s ≈ Rate × Payload.\n- Tick [ms]: okres próbkowania monitoringu (\`MONITOR_TICK_MS\`). Domyślnie 1000 ms w aplikacji; w badaniach zwykle 200–250 ms.\n- Wpływ warmup/cooldown: odcięcie początkowych/końcowych odcinków stabilizuje średnie i zwęża CI.\n- Minimalne kryteria wiarygodności (propozycja):\n  - n(used) ≥ 10, CI95/średnia (Rate) < 30%, CI95/średnia (Bytes/s) < 30%.\n  - Relacja Bytes≈Rate×Payload: błąd względny < 30% dla przebiegów kontrolowanych.\n`;
+  return `\n\n### Metrologia — jak czytać i co oznaczają wyniki\n\n- n (used/total): liczba próbek wykorzystanych w średnich po trimowaniu vs. całkowita. Zalecane n(used) ≥ 10.\n- Rate [/s] i CI95 Rate: średnia częstość i 95% przedział ufności (mniejszy CI → stabilniejsze wyniki).\n  - Praktyczne kryterium: CI95/średnia < 30% uznajemy za stabilne dla krótkich przebiegów.\n- CI95/avg: względna szerokość przedziału ufności (niższy lepszy).\n- σ(rate): odchylenie standardowe — informuje o zmienności częstości między próbkami.\n- Median Rate/Bytes: mediana — odporna na wartości odstające.\n- Bytes/s i CI95 Bytes: przepływność i jej niepewność. Dla stałego payloadu oczekujemy Bytes/s ≈ Rate × Payload.\n- Tick [ms]: okres próbkowania monitoringu (\`MONITOR_TICK_MS\`). Domyślnie 1000 ms w aplikacji; w badaniach zwykle 200–250 ms.\n- Wpływ warmup/cooldown: odcięcie początkowych/końcowych odcinków stabilizuje średnie i zwęża CI.\n- Minimalne kryteria wiarygodności (propozycja):\n  - n(used) ≥ 10, CI95/średnia (Rate) < 30%, CI95/średnia (Bytes/s) < 30%.\n  - Relacja Bytes≈Rate×Payload: błąd względny < 30% dla przebiegów kontrolowanych.\n`;
 }
 
 // Visual comparison helpers
