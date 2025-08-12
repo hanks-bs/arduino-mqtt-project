@@ -521,7 +521,7 @@ type MeasureOpts = {
   payloadWs?: number; // WS-specific payload
   payloadWs?: number; // WS-specific payload
   payloadHttp?: number; // HTTP-specific payload
-  pair?: boolean; // paruj scenariusze WS/HTTP dla tych samych parametrów
+  pair?: boolean; // pair WS/HTTP scenarios for the same parameters
 };
 
 export async function runMeasurements(opts: MeasureOpts = {}) {
