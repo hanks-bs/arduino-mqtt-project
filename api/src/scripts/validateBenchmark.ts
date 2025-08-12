@@ -89,7 +89,7 @@ async function main() {
       : rc.wsPayload === rc.httpPayload;
   if (!fairPayload) {
     fail.push(
-      `Niefair payload: wsPayload=${rc.wsPayload}B, httpPayload=${rc.httpPayload}B`,
+      `Unfair payload: wsPayload=${rc.wsPayload}B, httpPayload=${rc.httpPayload}B`,
     );
   }
 
