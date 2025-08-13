@@ -1,117 +1,121 @@
-# Arduino MQTT Monitoring — Przewodnik produkcyjny (PL)
+# Arduino MQTT Monitoring — Przewodnik po projekcie (PL)
 
-Monorepo zawiera kompletny, produkcyjny zestaw do akwizycji, transportu, monitoringu i wizualizacji telemetrii z Arduino w czasie rzeczywistym.
+Języki / Languages: [Polski (PL)](./README.pl.md) | [English (EN)](./README.en.md)
+
+Monorepo zawiera kompletny, produkcyjny zestaw do akwizycji, transportu, monitoringu i wizualizacji telemetrii z urządzenia Arduino w czasie rzeczywistym.
 
 Skróty: [Aspekt badawczy](./docs/ASPEKT_BADAWCZY.md) • [Glosariusz](./docs/GLOSARIUSZ.md)
 
-- api/ — Backend Express + TypeScript: odczyt szeregowy, publikacja/subskrypcja MQTT, strumień WebSocket, endpoint HTTP, monitoring zasobów, sesje, eksport CSV
-- client/ — Dashboard Next.js 15 (React 19, MUI, ApexCharts) z WS + HTTP fallback
-- mosquitto/ — Konfiguracja Eclipse Mosquitto i wolumeny
-- serial-bridge/ — Narzędzie dla Windows do odczytu COM na hoście i publikacji do MQTT
+- `api/` — Backend oparty na Express.js i TypeScript: odczyt portu szeregowego, publikacja/subskrypcja w MQTT, strumień WebSocket, endpointy HTTP, monitoring zasobów, obsługa sesji pomiarowych, eksport do CSV.
+- `client/` — Dashboard w Next.js 15 (React 19, MUI, ApexCharts) z obsługą WebSocket i fallbackiem do HTTP.
+- `mosquitto/` — Konfiguracja brokera Eclipse Mosquitto wraz z wolumenami.
+- `serial-bridge/` — Narzędzie dla systemu Windows, służące do odczytu portu COM na hoście i publikacji danych do brokera MQTT.
 
-Architektura wspiera trzy tryby uruchomienia: pełna konteneryzacja na Linux (USB zmapowane), Windows z mostkiem szeregowym na hoście oraz lokalny development.
+Architektura wspiera trzy główne tryby uruchomienia: pełną konteneryzację w systemie Linux (z mapowaniem portu USB), pracę w systemie Windows z użyciem mostka szeregowego na hoście oraz lokalny development.
 
 ---
 
 ## Przegląd architektury
 
-Ścieżka danych:
+**Ścieżka przepływu danych:**
 
-Arduino → linie JSON z portu szeregowego → MQTT (retain) → subskrybent w API → WS/HTTP → UI klienta
+Urządzenie Arduino → (linie JSON wysyłane przez port szeregowy) → Broker MQTT (z flagą `retain`) → Subskrybent w API → WebSocket/HTTP → Interfejs użytkownika (UI)
 
-Dodatkowo API publikuje przetworzone dane co ~1 s, utrzymuje ograniczoną historię w pamięci oraz wysyła metryki zasobów co sekundę.
+Dodatkowo, API cyklicznie publikuje przetworzone dane (domyślnie co 1 sekundę), utrzymuje w pamięci ograniczoną historię odczytów oraz wysyła metryki zasobów co sekundę.
 
-Kluczowe komponenty:
+**Kluczowe komponenty:**
 
-- SerialService — odporna obsługa portu z reconnect/backoff
-- ArduinoDataService — pobiera ostatnią linię z serial i publikuje do MQTT (retain)
-- MqttSubscriber — waliduje ładunki, dodaje znacznik czasu, utrzymuje historię, emituje WS
-- ResourceMonitorService — CPU/pamięć/ELU/opóźnienia pętli, przepływność, jitter, staleness (wiek danych); sesje; CSV
-- WebSocket Provider (client) — zarządza cyklem życia gniazda; wykresy i KPI w sekcjach
+- `SerialService` — zapewnia odporną na błędy obsługę portu szeregowego z mechanizmami ponawiania połączenia (reconnect/backoff).
+- `ArduinoDataService` — odczytuje ostatnią linię danych z portu szeregowego i publikuje ją do brokera MQTT z flagą `retain`.
+- `MqttSubscriber` — waliduje odebrane ładunki, wzbogaca je o znacznik czasu, zarządza historią odczytów i emituje dane przez WebSocket.
+- `ResourceMonitorService` — monitoruje zużycie CPU, pamięci, obciążenie pętli zdarzeń (ELU), opóźnienia, przepustowość, jitter i wiek danych (staleness). Odpowiada również za sesje pomiarowe i eksport do formatu CSV.
+- `WebSocket Provider` (w kliencie) — zarządza cyklem życia połączenia WebSocket i dostarcza dane do komponentów wizualizacyjnych.
 
 ---
 
 ## Scenariusze uruchomienia
 
-### A) Linux/WSL2 z bezpośrednim urządzeniem USB
+### A) Linux/WSL2 z bezpośrednim dostępem do urządzenia USB
 
-1. Zmapuj urządzenie w pliku docker‑compose.yml (root):
+1. Zmapuj urządzenie w głównym pliku `docker-compose.yml`:
 
-```yaml
-services:
-  arduino-api:
-    environment:
-      SERIAL_PORT: /dev/ttyUSB0 # lub /dev/ttyACM0
-      BAUD_RATE: 9600
-    devices:
-      - /dev/ttyUSB0:/dev/ttyUSB0
-```
+   ```yaml
+   services:
+     arduino-api:
+       environment:
+         SERIAL_PORT: /dev/ttyUSB0 # lub /dev/ttyACM0
+         BAUD_RATE: 9600
+       devices:
+         - /dev/ttyUSB0:/dev/ttyUSB0
+   ```
 
-1. Uruchom stack:
+2. Uruchom cały stos aplikacyjny:
 
-```bash
-docker compose up -d --build
-```
+   ```bash
+   docker compose up -d --build
+   ```
 
-1. Sprawdź w logach API otwarcie portu i napływ danych.
+3. Sprawdź w logach kontenera API, czy port został poprawnie otwarty i czy napływają dane.
 
-### B) Windows — zalecany mostek szeregowy (bez USB w kontenerze)
+### B) Windows — zalecany tryb z mostkiem szeregowym
 
-1. Pozostaw `SERIAL_PORT=disabled` w compose (domyślne).
+Ten tryb nie wymaga mapowania portu USB do kontenera.
 
-2. Uruchom stack:
+1. Upewnij się, że w pliku `docker-compose.yml` zmienna `SERIAL_PORT` jest ustawiona na `disabled` (wartość domyślna).
 
-```pwsh
-docker compose up -d --build
-```
+2. Uruchom stos:
 
-1. Uruchom mostek na hoście:
+   ```powershell
+   docker compose up -d --build
+   ```
 
-```pwsh
-cd serial-bridge
-copy .env.example .env
-# dopasuj COM_PORT (np. COM3)
-npm install
-node serial-bridge.js
-```
+3. Uruchom mostek szeregowy na maszynie hosta:
 
-1. Zweryfikuj endpoint API:
+   ```powershell
+   cd serial-bridge
+   copy .env.example .env
+   # W pliku .env dostosuj COM_PORT do swojego urządzenia (np. COM3)
+   npm install
+   node serial-bridge.js
+   ```
 
-```pwsh
-curl http://localhost:5000/api/arduino-data
-```
+4. Zweryfikuj działanie, odpytując endpoint API:
 
-Pełny przewodnik: docs/serial-bridge.md
+   ```powershell
+   curl http://localhost:5000/api/arduino-data
+   ```
 
-### C) Opcjonalnie: pełna konteneryzacja na Windows
+   Szczegółowy przewodnik: `docs/serial-bridge.md`.
 
-Możliwa z usbipd‑win + WSL2 i podpięciem USB do VM. W praktyce tryb mostka jest prostszy i stabilniejszy.
+### C) Opcjonalnie: Pełna konteneryzacja w systemie Windows
+
+Jest to możliwe przy użyciu `usbipd-win` i WSL2, co pozwala na podpięcie urządzenia USB bezpośrednio do maszyny wirtualnej. W praktyce jednak tryb z mostkiem (B) jest prostszy w konfiguracji i bardziej stabilny.
 
 ---
 
 ## Zmienne środowiskowe
 
-### API (api/.env)
+### API (`api/.env`)
 
 ```env
 PORT=5000
 NODE_ENV=production
-SERIAL_PORT=disabled        # /dev/ttyUSB0 / COM3 / disabled
+SERIAL_PORT=disabled        # Ścieżka do portu, np. /dev/ttyUSB0, COM3, lub 'disabled'
 BAUD_RATE=9600
 MQTT_BROKER=mqtt://mosquitto:1883
 MQTT_TOPIC=arduino/sensordata
 SELF_POLL_URL=http://arduino-api:5000/api/arduino-data
-LIVE_EMIT_ENABLED=1         # 0 wyłącza emisje WS (alias: LIVE_REALTIME_ENABLED)
+LIVE_EMIT_ENABLED=1         # 0 wyłącza emisję przez WebSocket (alias: LIVE_REALTIME_ENABLED)
 ```
 
-### Client (client/.env.local)
+### Klient (`client/.env.local`)
 
 ```env
 NEXT_PUBLIC_WS_URL=ws://localhost:5000
 NEXT_PUBLIC_API_BASE=http://localhost:5000
 ```
 
-### Serial Bridge (serial-bridge/.env)
+### Mostek szeregowy (`serial-bridge/.env`)
 
 ```env
 COM_PORT=COM3
@@ -122,102 +126,103 @@ MQTT_TOPIC=arduino/sensordata
 
 ---
 
-## Endpointy
+## Główne endpointy API
 
-- GET /api/arduino-data — ostatni zestaw (lastMeasurement + bounded history), łańcuch JSON w `{ success, data }`
-- GET /health — zdrowie serwisu, status serial
+- `GET /api/arduino-data` — zwraca ostatni odczyt wraz z ograniczoną historią, w formacie `{ success, data }`.
+- `GET /health` — informuje o stanie serwisu, w tym o statusie połączenia z portem szeregowym.
 
-Monitoring i sesje:
+**Monitoring i sesje pomiarowe:**
 
-- GET /api/monitor/live — pojedyncza próbka metryk
-- POST /api/monitor/start — body `{ label, mode: 'ws'|'polling', pollingIntervalMs?, sampleCount?, durationSec? }`
-- POST /api/monitor/stop — body `{ id }`
-- POST /api/monitor/reset — kasuje sesje
-- GET /api/monitor/sessions — lista sesji
-- GET /api/monitor/sessions/:id — jedna sesja
-- GET /api/monitor/sessions/export/csv — eksport metryk do CSV
-- GET /api/monitor/live-emit — sprawdź przełącznik emisji
-- POST /api/monitor/live-emit — ustaw `{ enabled: boolean }`
+- `GET /api/monitor/live` — zwraca pojedynczą, aktualną próbkę metryk.
+- `POST /api/monitor/start` — rozpoczyna nową sesję pomiarową. W ciele żądania: `{ label, mode: 'ws'|'polling', pollingIntervalMs?, sampleCount?, durationSec? }`.
+- `POST /api/monitor/stop` — zatrzymuje sesję o podanym ID. W ciele: `{ id }`.
+- `POST /api/monitor/reset` — kasuje wszystkie zapisane sesje.
+- `GET /api/monitor/sessions` — zwraca listę wszystkich sesji.
+- `GET /api/monitor/sessions/:id` — zwraca szczegóły pojedynczej sesji.
+- `GET /api/monitor/sessions/export/csv` — eksportuje metryki wszystkich sesji do formatu CSV.
+- `GET /api/monitor/live-emit` — sprawdza, czy emisja na żywo jest włączona.
+- `POST /api/monitor/live-emit` — włącza lub wyłącza emisję. W ciele: `{ enabled: boolean }`.
 
-Zdarzenia WebSocket:
+**Zdarzenia WebSocket:**
 
-- arduinoData — ostatni zestaw danych (łańcuch JSON)
-- metrics — obiekt LiveMetrics (co sekundę)
+- `arduinoData` — wysyła ostatni zestaw danych (jako string JSON).
+- `metrics` — wysyła obiekt `LiveMetrics` (domyślnie co sekundę).
 
 ---
 
-## Metryki na żywo (co 1 s)
+## Metryki na żywo (próbkowane co 1 s)
 
-- CPU procesu, pamięć (RSS, heap, external, ArrayBuffers)
-- ELU i percentyle opóźnienia pętli zdarzeń (p50/p99/max)
-- Liczba klientów WS
-- Przepływność: HTTP req/s, WS msg/s, bajty/s (HTTP, WS) oraz skumulowane sumy
-- Średnie rozmiary ładunków (bajty/req, bajty/msg)
-- Jitter: odchylenie standardowe odstępów (HTTP, WS)
-- Staleness (wiek danych): ms od ostatniego timestamp z Arduino (niżej=lepiej)
+- Zużycie CPU przez proces, zużycie pamięci (RSS, heap, external, ArrayBuffers).
+- Obciążenie pętli zdarzeń (ELU) i jej opóźnienia (percentyle p50/p99/max).
+- Liczba aktywnych klientów WebSocket.
+- Przepustowość: żądania HTTP/s, wiadomości WS/s, bajty/s (dla HTTP i WS) oraz sumy skumulowane.
+- Średni rozmiar ładunku (bajty/żądanie, bajty/wiadomość).
+- Jitter: odchylenie standardowe odstępów między zdarzeniami (dla HTTP i WS).
+- Wiek danych (staleness): czas w milisekundach od ostatniego znacznika czasu z Arduino (im niższy, tym dane są „świeższe”).
 
-Sesje zapisują próbki i opcjonalnie uruchamiają z API deterministyczne sprawdzanie HTTP (polling).
+Sesje pomiarowe zapisują próbki metryk i mogą opcjonalnie uruchamiać deterministyczne odpytywanie HTTP (polling) z poziomu API.
 
 ---
 
 ## Wdrożenie produkcyjne
 
-- Użyj wieloetapowych Dockerfile; uruchamiaj przez root docker‑compose.yml (Mosquitto, API, Client).
-- W produkcji zaostrz CORS i włącz Helmet (już warunkowo wg NODE_ENV).
-- Rozważ agregację logów i eksport metryk (Prometheus).
-- Trwałość Mosquitto (wolumeny) jeśli wymagana retencja.
+- Do wdrożenia użyj wieloetapowych plików Dockerfile. Uruchamiaj aplikację za pomocą głównego pliku `docker-compose.yml`, który zarządza kontenerami Mosquitto, API i klienta.
+- W środowisku produkcyjnym zaostrz politykę CORS i włącz bibliotekę Helmet (jest już skonfigurowana warunkowo w zależności od `NODE_ENV`).
+- Rozważ wdrożenie centralnego systemu logowania i eksportu metryk (np. do systemu Prometheus).
+- Skonfiguruj trwałość danych dla brokera Mosquitto (za pomocą wolumenów), jeśli wymagana jest retencja wiadomości.
 
 ---
 
 ## Rozwiązywanie problemów
 
-- „Brak danych”/pusty payload: sprawdź mostek (Windows) lub mapowanie urządzenia i format JSON.
-- ENOENT/EACCES na serial: zweryfikuj ścieżkę/uprawnienia; na Linux użyj grupy dialout lub uruchom kontener jako root do debug.
-- Hostname MQTT: wewnątrz compose użyj `mosquitto`, z hosta `localhost`.
+- **Komunikat „Brak danych” lub pusty ładunek**: Sprawdź działanie mostka szeregowego (w systemie Windows) lub poprawność mapowania urządzenia i formatu JSON.
+- **Błąd `ENOENT` lub `EACCES` na porcie szeregowym**: Zweryfikuj ścieżkę do portu i uprawnienia. W systemie Linux może być konieczne dodanie użytkownika do grupy `dialout` lub tymczasowe uruchomienie kontenera z uprawnieniami roota w celach diagnostycznych.
+- **Błąd `ENOTFOUND` dla brokera MQTT**: Upewnij się, że używasz poprawnej nazwy hosta – `mosquitto` wewnątrz sieci Docker, a `localhost` przy dostępie z maszyny hosta.
 
 ---
 
 ## Wskazówki do badań
 
-- Wyłącz emisje w czasie rzeczywistym na czas pomiarów: `LIVE_EMIT_ENABLED=0` lub POST `/api/monitor/live-emit` z `{ enabled:false }`.
-- Porównuj WS vs HTTP polling dla identycznych parametrów sesji; eksportuj CSV i analizuj jitter, bajty/s, CPU.
+- Aby zapewnić rzetelność pomiarów, wyłącz emisje w czasie rzeczywistym na czas ich trwania. Możesz to zrobić, ustawiając zmienną `LIVE_EMIT_ENABLED=0` lub wysyłając żądanie `POST /api/monitor/live-emit` z ciałem `{ "enabled": false }`.
+- Porównuj tryby WebSocket i HTTP Polling dla identycznych parametrów sesji. Eksportuj wyniki do formatu CSV, aby analizować jitter, przepustowość i zużycie CPU.
 
 ---
 
-## Pomiary, eksport i dokument badawczy
+## Pomiary, eksport i dokumentacja badawcza
 
-Po stronie API dostępny jest kompletny mechanizm pomiarów, eksportu i aktualizacji dokumentacji.
+Po stronie API zaimplementowano kompletny mechanizm do przeprowadzania pomiarów, eksportu wyników i automatycznej aktualizacji dokumentacji badawczej.
 
-- Uruchom pełny zestaw pomiarowy (pliki wynikowe w `api/benchmarks/<timestamp>/`):
-  - `yarn measure` (z katalogu `api/`)
-- Pliki wynikowe jednego uruchomienia:
-  - `sessions.csv` — spłaszczone próbki sesji (WS i HTTP)
-  - `summary.json` — statystyki zbiorcze (średnie, ELU p99, jitter, staleness)
-  - `README.md` — podsumowanie z mapowaniem do dashboardu
-- Zaktualizuj dokument badawczy o ostatnie wyniki (sekcja auto w `docs/ASPEKT_BADAWCZY.md`):
-  - `yarn docs:research:update` (z katalogu `api/`)
+- **Uruchomienie pełnego zestawu pomiarów** (pliki wynikowe są zapisywane w `api/benchmarks/<timestamp>/`):
+  - Z katalogu `api/` wykonaj: `yarn measure`
 
-Skróty pomiarowe (z katalogu `api/`):
+- **Pliki wynikowe pojedynczego uruchomienia:**
+  - `sessions.csv` — spłaszczone próbki z sesji pomiarowych (dla WS i HTTP).
+  - `summary.json` — statystyki zbiorcze (średnie, ELU p99, jitter, staleness).
+  - `README.md` — podsumowanie wyników z mapowaniem na wskaźniki w dashboardzie.
 
-- `npm run research:quick` — krótki sanity check.
-- `npm run research:safe` — bezpieczny (0.5–1 Hz, tick=500 ms).
-- `npm run research:sanity` — stabilny sanity @1 Hz (12 s) z wyłączonym próbkowaniem CPU (`--disablePidusage`).
-- `npm run research:full` — pełny zestaw (Hz: 0.5,1,2; Load: 0,25,50; tick=200 ms).
+- **Aktualizacja dokumentu badawczego** o najnowsze wyniki (sekcja `AUTO-RESULTS` w `docs/ASPEKT_BADAWCZY.md`):
+  - Z katalogu `api/` wykonaj: `yarn docs:research:update`
 
-Uwagi (Windows PowerShell):
+**Skróty do różnych trybów pomiarowych** (uruchamiane z katalogu `api/`):
 
-- Unikaj składni `FOO=1 node ...` — w `pwsh` używaj flag runnera: `--disablePidusage` lub `--cpuSampleMs=1000`.
+- `npm run research:quick` — szybki test poprawności (sanity check).
+- `npm run research:safe` — tryb bezpieczny (0.5–1 Hz, tick=500 ms), minimalizujący obciążenie.
+- `npm run research:sanity` — stabilny test poprawności przy 1 Hz (12 s) z wyłączonym próbkowaniem CPU (`--disablePidusage`).
+- `npm run research:full` — pełny zestaw testów (Hz: 0.5, 1, 2; Obciążenie CPU: 0, 25, 50%; tick=200 ms).
 
-Uwagi:
+**Uwagi dla Windows PowerShell:**
 
-- Aby ograniczyć szum, tymczasowo wyłącz emisje w czasie rzeczywistym: `LIVE_EMIT_ENABLED=0` lub `POST /api/monitor/live-emit` z `{ enabled:false }`.
-- Parametry i tolerancje możesz dostosować w `api/src/scripts/measurementRunner.ts`.
-  - Flagi runnera (przyjazne PowerShell): `--disablePidusage` (wyłącza próbnik CPU) oraz `--cpuSampleMs=1000` (przytłumia pobieranie próbek), jeśli chcesz przywrócić metrykę CPU bez zbyt dużego narzutu.
+- Unikaj składni `FOO=1 node ...`. W PowerShellu używaj flag przekazywanych do skryptu, np. `--disablePidusage` lub `--cpuSampleMs=1000`.
+
+**Wskazówki dodatkowe:**
+
+- Aby ograniczyć szum pomiarowy, tymczasowo wyłącz emisje w czasie rzeczywistym (`LIVE_EMIT_ENABLED=0` lub przez endpoint API).
+- Parametry pomiarów i progi tolerancji można dostosować w pliku `api/src/scripts/measurementRunner.ts`.
+- Flagi takie jak `--disablePidusage` (wyłącza próbnik CPU) oraz `--cpuSampleMs=1000` (zmniejsza częstotliwość próbkowania) pozwalają zredukować narzut samego mechanizmu monitorującego.
 
 ---
-
 ---
 
 ## Licencja i wkład
 
-Dodaj licencję (np. MIT). PR i zgłoszenia mile widziane.
+Projekt udostępniany na licencji MIT. Pull requesty i zgłoszenia błędów są mile widziane.

@@ -1,115 +1,117 @@
 # Arduino MQTT Monitoring — Production Guide (EN)
 
-This monorepo contains a complete, production‑ready reference stack for real‑time Arduino telemetry acquisition, transport, monitoring, and visualization.
+This monorepo contains a complete, production-ready reference stack for real-time Arduino telemetry acquisition, transport, monitoring, and visualization.
 
-- api/ — Express + TypeScript backend: Serial ingestion, MQTT publish/subscribe, WebSocket streaming, HTTP polling endpoint, resource monitoring, sessions, CSV export
-- client/ — Next.js 15 dashboard (React 19, MUI, ApexCharts) with WS + HTTP fallback
-- mosquitto/ — Eclipse Mosquitto configuration and mounted volumes
-- serial-bridge/ — Windows‑only helper to read COM port on host and publish to MQTT
+- `api/` — Express.js + TypeScript backend: Serial ingestion, MQTT publish/subscribe, WebSocket streaming, HTTP polling endpoint, resource monitoring, measurement sessions, and CSV export.
+- `client/` — Next.js 15 dashboard (React 19, MUI, ApexCharts) with WebSocket support and an HTTP fallback.
+- `mosquitto/` — Eclipse Mosquitto broker configuration and mounted volumes.
+- `serial-bridge/` — A Windows-only helper tool to read from a COM port on the host and publish data to the MQTT broker.
 
-The design supports three run modes: fully dockerized on Linux (USB mapped), Windows with a host serial bridge, and local development.
-
----
-
-## Architecture overview
-
-Data path:
-
-Arduino → Serial JSON lines → MQTT retain topic → API subscriber → WS/HTTP → Client UI
-
-Additionally, the API publishes processed data roughly every 1 s, maintains an in‑memory bounded history, and emits per‑second resource metrics.
-
-Key components:
-
-- SerialService — robust port handling with reconnect/backoff
-- ArduinoDataService — reads latest serial line and publishes to MQTT (retain)
-- MqttSubscriber — validates payloads, enriches with timestamp, maintains history, emits WS
-- ResourceMonitorService — CPU/memory/ELU/event‑loop delay, throughput, jitter, staleness; sessions; CSV export
-- Client WS Provider — central socket lifecycle and context; charts and KPIs across sections
+The architecture supports three main run modes: fully containerized on Linux (with USB mapping), Windows with a host-based serial bridge, and local development.
 
 ---
 
-## Run scenarios
+## Architecture Overview
 
-### A) Linux/WSL2 with direct USB device
+**Data Path:**
 
-1. Map your device in root docker‑compose.yml:
+Arduino device → (JSON lines sent via serial port) → MQTT Broker (with `retain` flag) → API Subscriber → WebSocket/HTTP → Client User Interface (UI)
 
-```yaml
-services:
-  arduino-api:
-    environment:
-      SERIAL_PORT: /dev/ttyUSB0 # or /dev/ttyACM0
-      BAUD_RATE: 9600
-    devices:
-      - /dev/ttyUSB0:/dev/ttyUSB0
-```
+Additionally, the API periodically publishes processed data (by default, every 1 second), maintains a bounded in-memory history of readings, and emits resource metrics every second.
+
+**Key Components:**
+
+- `SerialService` — Provides robust serial port handling with reconnect/backoff mechanisms.
+- `ArduinoDataService` — Reads the latest data line from the serial port and publishes it to the MQTT broker with the `retain` flag.
+- `MqttSubscriber` — Validates incoming payloads, enriches them with a timestamp, manages the reading history, and emits data via WebSocket.
+- `ResourceMonitorService` — Monitors CPU usage, memory, event loop utilization (ELU), delays, throughput, jitter, and data staleness. It also handles measurement sessions and CSV exports.
+- `WebSocket Provider` (in the client) — Manages the WebSocket connection lifecycle and delivers data to visualization components.
+
+---
+
+## Run Scenarios
+
+### A) Linux/WSL2 with Direct USB Device Access
+
+1. Map your device in the root `docker-compose.yml` file:
+
+   ```yaml
+   services:
+     arduino-api:
+       environment:
+         SERIAL_PORT: /dev/ttyUSB0 # or /dev/ttyACM0
+         BAUD_RATE: 9600
+       devices:
+         - /dev/ttyUSB0:/dev/ttyUSB0
+   ```
+
+2. Start the entire application stack:
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+3. Check the API container logs to confirm that the port was opened correctly and that data is flowing.
+
+### B) Windows — Recommended Mode with Serial Bridge
+
+This mode does not require mapping the USB port to the container.
+
+1. Ensure that the `SERIAL_PORT` variable in `docker-compose.yml` is set to `disabled` (the default value).
 
 2. Start the stack:
 
-```bash
-docker compose up -d --build
-```
+   ```powershell
+   docker compose up -d --build
+   ```
 
-3. Verify API logs show an open serial port and periodic data.
+3. Run the serial bridge on the host machine:
 
-### B) Windows — recommended Serial Bridge (no USB passthrough)
+   ```powershell
+   cd serial-bridge
+   copy .env.example .env
+   # Adjust COM_PORT in the .env file to match your device (e.g., COM3)
+   npm install
+   node serial-bridge.js
+   ```
 
-1. Keep `SERIAL_PORT=disabled` in compose (default provided).
+4. Verify the setup by querying the API endpoint:
 
-2. Run the stack:
+   ```powershell
+   curl http://localhost:5000/api/arduino-data
+   ```
 
-```pwsh
-docker compose up -d --build
-```
+   A detailed guide is available in `docs/serial-bridge.md`.
 
-3. Start the bridge on host:
+### C) Optional: Full Containerization on Windows
 
-```pwsh
-cd serial-bridge
-copy .env.example .env
-# adjust COM_PORT if needed (e.g., COM3)
-npm install
-node serial-bridge.js
-```
-
-4. Check the API endpoint:
-
-```pwsh
-curl http://localhost:5000/api/arduino-data
-```
-
-Full guide: docs/serial-bridge.md
-
-### C) Optional: Full containerization on Windows
-
-Possible with usbipd‑win + WSL2 attaching the USB device to the Linux VM. Usually the bridge mode is simpler and more robust.
+This is possible using `usbipd-win` and WSL2, which allows you to attach a USB device directly to the virtual machine. However, in practice, the bridge mode (B) is simpler to configure and more stable.
 
 ---
 
-## Environment variables
+## Environment Variables
 
-### API (api/.env)
+### API (`api/.env`)
 
 ```env
 PORT=5000
 NODE_ENV=production
-SERIAL_PORT=disabled        # /dev/ttyUSB0 / COM3 / disabled
+SERIAL_PORT=disabled        # Path to the port, e.g., /dev/ttyUSB0, COM3, or 'disabled'
 BAUD_RATE=9600
 MQTT_BROKER=mqtt://mosquitto:1883
 MQTT_TOPIC=arduino/sensordata
 SELF_POLL_URL=http://arduino-api:5000/api/arduino-data
-LIVE_EMIT_ENABLED=1         # 0 disables real-time WS emissions (alias: LIVE_REALTIME_ENABLED)
+LIVE_EMIT_ENABLED=1         # 0 disables WebSocket emissions (alias: LIVE_REALTIME_ENABLED)
 ```
 
-### Client (client/.env.local)
+### Client (`client/.env.local`)
 
 ```env
 NEXT_PUBLIC_WS_URL=ws://localhost:5000
 NEXT_PUBLIC_API_BASE=http://localhost:5000
 ```
 
-### Serial Bridge (serial-bridge/.env)
+### Serial Bridge (`serial-bridge/.env`)
 
 ```env
 COM_PORT=COM3
@@ -120,92 +122,103 @@ MQTT_TOPIC=arduino/sensordata
 
 ---
 
-## Endpoints
+## Main API Endpoints
 
-- GET /api/arduino-data — latest composite payload (lastMeasurement + bounded history), JSON string wrapped in `{ success, data }`
-- GET /health — service health including serial status
+- `GET /api/arduino-data` — Returns the latest reading along with a bounded history, in the format `{ success, data }`.
+- `GET /health` — Reports the service's health, including the serial port connection status.
 
-Monitoring & sessions:
+**Monitoring and Measurement Sessions:**
 
-- GET /api/monitor/live — single live metrics snapshot
-- POST /api/monitor/start — body `{ label, mode: 'ws'|'polling', pollingIntervalMs?, sampleCount?, durationSec? }`
-- POST /api/monitor/stop — body `{ id }`
-- POST /api/monitor/reset — clears all sessions
-- GET /api/monitor/sessions — list sessions
-- GET /api/monitor/sessions/:id — single session
-- GET /api/monitor/sessions/export/csv — CSV export of flattened metrics
-- GET /api/monitor/live-emit — check real-time emission flag
-- POST /api/monitor/live-emit — set `{ enabled: boolean }`
+- `GET /api/monitor/live` — Returns a single, current sample of metrics.
+- `POST /api/monitor/start` — Starts a new measurement session. Request body: `{ label, mode: 'ws'|'polling', pollingIntervalMs?, sampleCount?, durationSec? }`.
+- `POST /api/monitor/stop` — Stops the session with the specified ID. Body: `{ id }`.
+- `POST /api/monitor/reset` — Deletes all saved sessions.
+- `GET /api/monitor/sessions` — Returns a list of all sessions.
+- `GET /api/monitor/sessions/:id` — Returns the details of a single session.
+- `GET /api/monitor/sessions/export/csv` — Exports all session metrics to a CSV file.
+- `GET /api/monitor/live-emit` — Checks if live emissions are enabled.
+- `POST /api/monitor/live-emit` — Enables or disables emissions. Body: `{ enabled: boolean }`.
 
-WebSocket events:
+**WebSocket Events:**
 
-- arduinoData — latest composite dataset (JSON string)
-- metrics — LiveMetrics object (per-second)
-
----
-
-## Live metrics (per second)
-
-- CPU percent (process), memory breakdown (RSS, heap, external, ArrayBuffers)
-- Event Loop Utilization (ELU) and event‑loop delay percentiles (p50/p99/max)
-- WS client count
-- Throughput: HTTP req/s, WS msg/s, HTTP and WS bytes/s, cumulative totals
-- Average payload sizes (HTTP bytes/req, WS bytes/msg)
-- Jitter: stdDev of inter‑arrival intervals (HTTP, WS)
-- Staleness (data age): milliseconds since last Arduino timestamp (lower is fresher)
-
-Sessions can record these samples and optionally drive deterministic HTTP polling traffic from the API itself.
+- `arduinoData` — Sends the latest dataset (as a JSON string).
+- `metrics` — Sends the `LiveMetrics` object (by default, every second).
 
 ---
 
-## Production deployment notes
+## Live Metrics (Sampled Every 1s)
 
-- Use the provided multi‑stage Dockerfiles; run via root docker‑compose.yml to start Mosquitto, API, and Client.
-- Restrict CORS and enable Helmet in production (already wired conditionally by NODE_ENV).
-- Consider log aggregation (e.g., bring your own pino/winston) and metrics export (Prometheus) if needed.
-- Persist Mosquitto volumes for message durability, if your use case requires it.
+- Process CPU usage, memory consumption (RSS, heap, external, ArrayBuffers).
+- Event loop utilization (ELU) and its delays (p50/p99/max percentiles).
+- Number of active WebSocket clients.
+- Throughput: HTTP requests/s, WebSocket messages/s, bytes/s (for both HTTP and WS), and cumulative totals.
+- Average payload size (bytes/request, bytes/message).
+- Jitter: standard deviation of event intervals (for both HTTP and WS).
+- Data staleness: time in milliseconds since the last timestamp from the Arduino (lower is "fresher").
+
+Measurement sessions record samples of these metrics and can optionally run deterministic HTTP polling from the API level.
+
+---
+
+## Production Deployment
+
+- For deployment, use the multi-stage Dockerfiles. Run the application using the root `docker-compose.yml` file, which manages the Mosquitto, API, and client containers.
+- In a production environment, tighten the CORS policy and enable the Helmet library (it is already conditionally configured based on `NODE_ENV`).
+- Consider implementing a centralized logging system and exporting metrics (e.g., to Prometheus).
+- Configure data persistence for the Mosquitto broker (using volumes) if message retention is required.
 
 ---
 
 ## Troubleshooting
 
-- “Brak danych” or empty payloads: ensure the bridge is running (Windows) or the USB device is mapped and Arduino emits valid JSON lines.
-- ENOENT/EACCES on serial: verify device path/permissions; for Linux use dialout group or run the container as root for debugging.
-- MQTT hostnames: inside compose use service name `mosquitto`; from host use `localhost` (ports are published).
+- **"No data" message or empty payload**: Check the serial bridge's operation (on Windows) or the device mapping and JSON format.
+- **`ENOENT` or `EACCES` error on the serial port**: Verify the port path and permissions. On Linux, you may need to add the user to the `dialout` group or temporarily run the container as root for diagnostic purposes.
+- **`ENOTFOUND` error for the MQTT broker**: Ensure you are using the correct hostname – `mosquitto` within the Docker network, and `localhost` when accessing from the host machine.
 
 ---
 
-## Research workflow hints
+## Research Tips
 
-- Use the live‑emit toggle to disable real‑time WS emissions during measurements: env `LIVE_EMIT_ENABLED=0` or POST `/api/monitor/live-emit` with `{ enabled:false }`.
-- Compare WS vs HTTP polling by running sessions with identical durations/intervals; export CSV and analyze jitter, bytes/s, CPU.
-
----
-
-## Benchmarks, export and research doc
-
-The API provides a complete measurement pipeline, export, and auto‑update of the research document.
-
-- Run the full measurement suite (artifacts under `api/benchmarks/<timestamp>/`):
-  - `yarn measure` (from `api/`)
-  - Stable sanity: `npm run research:sanity` (WS+HTTP @1 Hz, 12 s, pidusage disabled)
-- Artifacts per run:
-  - `sessions.csv` — flattened per‑second samples for WS and HTTP
-  - `summary.json` — aggregates (averages, ELU p99, jitter, staleness)
-  - `README.md` — human‑readable summary mapped to the dashboard
-- Update the research document with the latest results (auto section in `docs/ASPEKT_BADAWCZY.md`):
-  - `yarn docs:research:update` (from `api/`)
-
-Notes:
-
-- To reduce noise, temporarily disable real‑time emissions: `LIVE_EMIT_ENABLED=0` or `POST /api/monitor/live-emit` with `{ enabled:false }`.
-- You can tune parameters and tolerances in `api/src/scripts/measurementRunner.ts`.
-- Runner flags (PowerShell‑friendly): `--disablePidusage` to turn off CPU sampling; `--cpuSampleMs=1000` to throttle it.
+- To ensure the reliability of measurements, disable real-time emissions during their execution. You can do this by setting the `LIVE_EMIT_ENABLED=0` variable or by sending a `POST /api/monitor/live-emit` request with the body `{ "enabled": false }`.
+- Compare WebSocket and HTTP Polling modes using identical session parameters. Export the results to a CSV file to analyze jitter, throughput, and CPU usage.
 
 ---
 
+## Measurements, Export, and Research Documentation
+
+The API side implements a complete mechanism for conducting measurements, exporting results, and automatically updating the research documentation.
+
+- **Run the full measurement suite** (output files are saved in `api/benchmarks/<timestamp>/`):
+  - From the `api/` directory, run: `yarn measure`
+
+- **Output files from a single run:**
+  - `sessions.csv` — Flattened samples from measurement sessions (for WS and HTTP).
+  - `summary.json` — Aggregate statistics (averages, ELU p99, jitter, staleness).
+  - `README.md` — A summary of the results with a mapping to the dashboard indicators.
+
+- **Update the research document** with the latest results (the `AUTO-RESULTS` section in `docs/ASPEKT_BADAWCZY.md`):
+  - From the `api/` directory, run: `yarn docs:research:update`
+
+**Shortcuts for different measurement modes** (run from the `api/` directory):
+
+- `npm run research:quick` — A quick sanity check.
+- `npm run research:safe` — A safe mode (0.5–1 Hz, tick=500 ms) that minimizes load.
+- `npm run research:sanity` — A stable sanity check at 1 Hz (12 s) with CPU sampling disabled (`--disablePidusage`).
+- `npm run research:full` — A full test suite (Hz: 0.5, 1, 2; CPU Load: 0, 25, 50%; tick=200 ms).
+
+**Notes for Windows PowerShell:**
+
+- Avoid syntax like `FOO=1 node ...`. In PowerShell, use flags passed to the script, e.g., `--disablePidusage` or `--cpuSampleMs=1000`.
+
+**Additional Tips:**
+
+- To reduce measurement noise, temporarily disable real-time emissions (`LIVE_EMIT_ENABLED=0` or via the API endpoint).
+- Measurement parameters and tolerance thresholds can be adjusted in the `api/src/scripts/measurementRunner.ts` file.
+- Flags like `--disablePidusage` (disables the CPU sampler) and `--cpuSampleMs=1000` (reduces the sampling frequency) help minimize the overhead of the monitoring mechanism itself.
+
+---
 ---
 
-## License and contributions
+## License and Contributions
 
-Add your license (e.g., MIT). Pull Requests and issues welcome.
+This project is licensed under the MIT License. Pull requests and bug reports are welcome.
