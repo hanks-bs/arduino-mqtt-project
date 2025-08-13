@@ -2,6 +2,8 @@
 
 Monorepo zawiera kompletny, produkcyjny zestaw do akwizycji, transportu, monitoringu i wizualizacji telemetrii z Arduino w czasie rzeczywistym.
 
+Skróty: [Aspekt badawczy](./docs/ASPEKT_BADAWCZY.md) • [Glosariusz](./docs/GLOSARIUSZ.md)
+
 - api/ — Backend Express + TypeScript: odczyt szeregowy, publikacja/subskrypcja MQTT, strumień WebSocket, endpoint HTTP, monitoring zasobów, sesje, eksport CSV
 - client/ — Dashboard Next.js 15 (React 19, MUI, ApexCharts) z WS + HTTP fallback
 - mosquitto/ — Konfiguracja Eclipse Mosquitto i wolumeny
@@ -45,13 +47,13 @@ services:
       - /dev/ttyUSB0:/dev/ttyUSB0
 ```
 
-2. Uruchom stack:
+1. Uruchom stack:
 
 ```bash
 docker compose up -d --build
 ```
 
-3. Sprawdź w logach API otwarcie portu i napływ danych.
+1. Sprawdź w logach API otwarcie portu i napływ danych.
 
 ### B) Windows — zalecany mostek szeregowy (bez USB w kontenerze)
 
@@ -63,7 +65,7 @@ docker compose up -d --build
 docker compose up -d --build
 ```
 
-3. Uruchom mostek na hoście:
+1. Uruchom mostek na hoście:
 
 ```pwsh
 cd serial-bridge
@@ -73,7 +75,7 @@ npm install
 node serial-bridge.js
 ```
 
-4. Zweryfikuj endpoint API:
+1. Zweryfikuj endpoint API:
 
 ```pwsh
 curl http://localhost:5000/api/arduino-data
@@ -190,7 +192,7 @@ Po stronie API dostępny jest kompletny mechanizm pomiarów, eksportu i aktualiz
   - `yarn measure` (z katalogu `api/`)
 - Pliki wynikowe jednego uruchomienia:
   - `sessions.csv` — spłaszczone próbki sesji (WS i HTTP)
-  - `summary.json` — agregaty (średnie, ELU p99, jitter, staleness)
+  - `summary.json` — statystyki zbiorcze (średnie, ELU p99, jitter, staleness)
   - `README.md` — podsumowanie z mapowaniem do dashboardu
 - Zaktualizuj dokument badawczy o ostatnie wyniki (sekcja auto w `docs/ASPEKT_BADAWCZY.md`):
   - `yarn docs:research:update` (z katalogu `api/`)

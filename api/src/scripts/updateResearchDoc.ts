@@ -5,6 +5,33 @@
 import fs from 'fs-extra';
 import path from 'node:path';
 
+// Centralny formatter spójnej precyzji
+function fmtKind(kind: string, value: any): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '—';
+  switch (kind) {
+    case 'rate':
+    case 'rateCli':
+      return n.toFixed(2);
+    case 'bytes':
+    case 'bytesCli':
+    case 'egress':
+    case 'payload':
+    case 'stale':
+    case 'ingest':
+    case 'emit':
+      return n.toFixed(0);
+    case 'jitter':
+    case 'elu':
+      return n.toFixed(1);
+    case 'cpu':
+    case 'rss':
+      return n.toFixed(1);
+    default:
+      return n.toFixed(2);
+  }
+}
+
 async function main() {
   const repoRoot = path.resolve(__dirname, '../../..');
   const benchesDir = path.join(repoRoot, 'api', 'benchmarks');
@@ -160,12 +187,7 @@ async function main() {
         // HTTP Bytes/s już sumuje po klientach
         return Number.isFinite(avgBytesRate) ? avgBytesRate : NaN;
       })();
-      const fmt = (n: number, f = 2) =>
-        Number.isFinite(n) ? n.toFixed(f) : '—';
-      const stale = Number.isFinite(Number((s as any).avgStalenessMs))
-        ? Number((s as any).avgStalenessMs)
-        : Number(s.avgFreshnessMs);
-      return `| ${s.label}${rep} | ${s.mode} | ${fmt(s.avgRate, 2)} | ${fmt(rateCli, 2)} | ${fmt(s.avgBytesRate, 0)} | ${fmt(bytesCli, 0)} | ${fmt(egressEst, 0)} | ${fmt(s.avgPayload, 0)} | ${fmt(s.avgJitterMs, 1)} | ${fmt(stale, 0)} | ${fmt(s.avgDelayP99, 1)} | ${fmt(s.avgCpu, 1)} | ${fmt(s.avgRss, 1)} | ${nUsed}/${nTotal} | ${rateOk} | ${payloadOk} |`;
+      return `| ${s.label}${rep} | ${s.mode} | ${fmtKind('rate', s.avgRate)} | ${fmtKind('rateCli', rateCli)} | ${fmtKind('bytes', s.avgBytesRate)} | ${fmtKind('bytesCli', bytesCli)} | ${fmtKind('egress', egressEst)} | ${fmtKind('payload', s.avgPayload)} | ${fmtKind('jitter', s.avgJitterMs)} | ${fmtKind('stale', s.avgFreshnessMs)} | ${fmtKind('elu', s.avgDelayP99)} | ${fmtKind('cpu', s.avgCpu)} | ${fmtKind('rss', s.avgRss)} | ${nUsed}/${nTotal} | ${rateOk} | ${payloadOk} |`;
     })
     .join('\n');
   const compactRows = items
@@ -186,12 +208,7 @@ async function main() {
             : NaN;
       const rep =
         s.repIndex && s.repTotal ? ` [rep ${s.repIndex}/${s.repTotal}]` : '';
-      const fmt = (n: number, f = 2) =>
-        Number.isFinite(n) ? n.toFixed(f) : '—';
-      const stale = Number.isFinite(Number((s as any).avgStalenessMs))
-        ? Number((s as any).avgStalenessMs)
-        : Number(s.avgFreshnessMs);
-      return `| ${s.label}${rep} | ${s.mode} | ${fmt(rateCli, 2)} | ${fmt(bytesCli, 0)} | ${fmt(s.avgJitterMs, 1)} | ${fmt(stale, 0)} | ${fmt(s.avgCpu, 1)} | ${fmt(s.avgRss, 1)} |`;
+      return `| ${s.label}${rep} | ${s.mode} | ${fmtKind('rateCli', rateCli)} | ${fmtKind('bytesCli', bytesCli)} | ${fmtKind('jitter', s.avgJitterMs)} | ${fmtKind('stale', s.avgFreshnessMs)} | ${fmtKind('cpu', s.avgCpu)} | ${fmtKind('rss', s.avgRss)} |`;
     })
     .join('\n');
 
@@ -237,7 +254,7 @@ ${renderTLDR(items)}
   - Jitter/Staleness: różnica ≥ 20% (lub ≥ 50 ms gdy wartości są rzędu setek ms).
   - CPU: różnice < 3–5 pp przy niskich obciążeniach to często szum; > 5–7 pp — potencjalnie istotne.
   - RSS: różnice < 10 MB zwykle pomijalne w tym kontekście, chyba że utrzymują się we wszystkich scenariuszach.
-- Spójność: uznaj różnicę za „realną”, jeśli powtarza się w obu powtórzeniach oraz w agregatach „wg obciążenia” i „wg liczby klientów”.
+- Spójność: uznaj różnicę za „realną”, jeśli powtarza się w obu powtórzeniach oraz w zestawieniach „wg obciążenia” i „wg liczby klientów”.
 - Semantyka WS vs HTTP: dla kosztu sieci WS oszacuj egress ≈ Rate × Payload × N (na wszystkich klientów); dla HTTP Bytes/s już zawiera sumę po klientach.
 
 ${compactHeader}
@@ -258,7 +275,6 @@ ${renderByLoadSection(byLoad)}
 ${renderByClientsSection(byClients)}
 
 ${renderMetrology(items, runCfg?.monitorTickMs)}
-${renderE2ELatency(items)}
 ${renderMetrologyGuide()}
 
 ${renderPairedComparisons(items)}
@@ -404,8 +420,8 @@ function nf(n: any, frac = 1): string {
 
 function renderMetrology(items: Array<any>, tickMs?: number): string {
   if (!items || items.length === 0) return '';
-  const header = `| Label | n (used/total) | Rate [/s] | CI95 Rate | CI95/avg | σ(rate) | Median Rate | Bytes/s | CI95 Bytes | CI95/avg | σ(bytes) | Median Bytes |
-|---|:--:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|`;
+  const header = `| Label | n (used/total) | Rate [/s] | CI95 Rate | CI95/avg | σ(rate) | Median Rate | Bytes/s | CI95 Bytes | CI95/avg | σ(bytes) | Median Bytes | Jitter [ms] | CI95 Jitter | σ(jitter) | Stal [ms] | CI95 Stal | σ(stal) | Median Stal | p95 Stal | Ingest E2E [ms] | CI95 Ingest | Emit E2E [ms] | CI95 Emit |
+|---|:--:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|`;
   const rows = items
     .map(s => {
       const nUsed = (s.nUsed ?? s.count) as number;
@@ -421,7 +437,17 @@ function renderMetrology(items: Array<any>, tickMs?: number): string {
         s.relCiBytes ??
           (ciBytes && s.avgBytesRate ? ciBytes / s.avgBytesRate : 0),
       );
-      return `| ${s.label} | ${nUsed}/${nTotal} | ${nf(s.avgRate, 2)} | ± ${nf(ciRate, 2)} | ${nf(relCiRate * 100, 0)}% | ${nf(rateStd, 2)} | ${nf(s.rateMedian, 2)} | ${nf(s.avgBytesRate, 0)} | ± ${nf(ciBytes, 0)} | ${nf(relCiBytes * 100, 0)}% | ${nf(bytesStd, 0)} | ${nf(s.bytesMedian, 0)} |`;
+      const ciJitter = Number(s.ci95Jitter ?? 0);
+      const jitterStd = Number(s.jitterStd ?? 0);
+      const ciFresh = Number(s.ci95Fresh ?? 0);
+      const freshStd = Number(s.freshStd ?? 0);
+      const freshMedian = Number(s.freshMedian ?? 0);
+      const freshP95 = Number(s.freshP95 ?? 0);
+      const ingestAvg = Number(s.ingestAvgMs ?? NaN);
+      const ciIngest = Number(s.ci95IngestMs ?? 0);
+      const emitAvg = Number(s.emitAvgMs ?? NaN);
+      const ciEmit = Number(s.ci95EmitMs ?? 0);
+      return `| ${s.label} | ${nUsed}/${nTotal} | ${nf(s.avgRate, 2)} | ± ${nf(ciRate, 2)} | ${nf(relCiRate * 100, 0)}% | ${nf(rateStd, 2)} | ${nf(s.rateMedian, 2)} | ${nf(s.avgBytesRate, 0)} | ± ${nf(ciBytes, 0)} | ${nf(relCiBytes * 100, 0)}% | ${nf(bytesStd, 0)} | ${nf(s.bytesMedian, 0)} | ${nf(s.avgJitterMs, 1)} | ± ${nf(ciJitter, 1)} | ${nf(jitterStd, 1)} | ${nf(s.avgFreshnessMs, 0)} | ± ${nf(ciFresh, 0)} | ${nf(freshStd, 0)} | ${nf(freshMedian, 0)} | ${nf(freshP95, 0)} | ${nf(ingestAvg, 0)} | ± ${nf(ciIngest, 0)} | ${nf(emitAvg, 0)} | ± ${nf(ciEmit, 0)} |`;
     })
     .join('\n');
 
@@ -430,24 +456,6 @@ function renderMetrology(items: Array<any>, tickMs?: number): string {
       ? String(tickMs)
       : '—';
   return `\n\n## Metrologia (95% CI) — ostatni run\n\nNiepewność średnich estymowana z próbek (tick ~ ${tick} ms).\n\n${header}\n${rows}\n`;
-}
-
-function renderE2ELatency(items: Array<any>): string {
-  try {
-    if (!items || items.length === 0) return '';
-    const header = `\n\n## E2E latency (źródło→ingest→emit) [ms]\n\n| Label | Src→Ingest avg | Src→Ingest p95 | Ingest→Emit avg | Ingest→Emit p95 | Src→Emit avg | Src→Emit p95 |\n|---|---:|---:|---:|---:|---:|---:|`;
-    const f = (v: any, d = 1) =>
-      Number.isFinite(Number(v)) ? Number(v).toFixed(d) : '—';
-    const rows = items
-      .map(
-        s =>
-          `| ${s.label} | ${f((s as any).avgSrcToIngestMs)} | ${f((s as any).p95SrcToIngestMs)} | ${f((s as any).avgIngestToEmitMs)} | ${f((s as any).p95IngestToEmitMs)} | ${f((s as any).avgSrcToEmitMs)} | ${f((s as any).p95SrcToEmitMs)} |`,
-      )
-      .join('\n');
-    return `\n${header}\n${rows}\n`;
-  } catch {
-    return '';
-  }
 }
 
 function renderByClientsSection(byClients: Array<any>): string {

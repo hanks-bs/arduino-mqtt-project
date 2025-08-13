@@ -2,6 +2,27 @@
 
 Poniżej zebrano zwięzły opis części badawczej projektu: cele, metodologia, metryki, procedury pomiarowe, kryteria oceny oraz mapowanie wyników na dashboard. Dokument opisuje, jak replikować oraz interpretować wyniki.
 
+Odnośniki skrócone: [Glosariusz terminów](./GLOSARIUSZ.md) • [Plan badań](./RESEARCH_PLAN.md) • [Hipotezy](./RESEARCH_HYPOTHESES.md)
+
+## Interpretacja w 10 sekund
+
+- Porównujemy WS (push) vs HTTP (polling) w kategoriach: świeżość (Staleness), stabilność (Jitter), koszty (CPU, Bytes/s), skalowanie (klienci), presja na event loop (EL delay p99 / ELU).
+- Fairness: porównuj pary o tym samym nominalnym Hz i payloadzie (sprawdź flagi fair payload, source-limited).
+- Per‑client normalizacja: HTTP dzielimy przez N; WS – Rate/cli = Rate, Bytes/cli = Rate×Payload.
+- Istotność: szerokość CI95 / średnia < 30% → metryka stabilna; nakładające się CI → różnica niejednoznaczna.
+- Gdy Staleness ≈ 1000 ms mimo Hz>1 → ogranicza źródło (source-limited) – ocena Rate jest drugorzędna.
+- Jitter duży w HTTP przy wielu klientach = zgrupowania timerów; WS zachowuje niski jitter (pojedynczy harmonogram emisji).
+
+Szybka replikacja (TL;DR):
+
+1. `cd api && yarn install`
+1. Uruchom broker/API/klienta: `docker compose up -d --build` (lub lokalnie)
+1. Wyłącz emisje live: `POST /api/monitor/live-emit { enabled:false }` (jeśli chcesz izolować)
+1. `yarn measure` lub profilowany skrót (`npm run research:full`)
+1. `yarn docs:research:update` aktualizuje sekcję AUTO-RESULTS.
+
+W dalszych sekcjach podkreślono warunki rzetelnego porównania i sposób liczenia niepewności.
+
 ## 1. Cel i pytania badawcze
 
 Celem jest ilościowe porównanie dwóch sposobów dostarczania danych telemetrycznych z systemu IoT do klienta:
@@ -127,6 +148,67 @@ Jak ograniczać jitter HTTP (praktyka):
 1. Zweryfikuj niepewność: CI95/avg < 30% uznaj za stabilne (dla krótkich biegów).
 1. Sprawdź „Metrologia (95% CI)” i „Porównania parowane” — czy różnice są spójne i istotne (nakładanie się CI)?
 
+### 2d. Metodologia statystyczna (formuły i założenia)
+
+Niepewność podajemy jako 95% CI dla średnich sesyjnych (po ewentualnym trimowaniu warmup/cooldown).
+
+Definicje na zbiorze n próbek (równomiernie ważonych po trimie). Uproszczenia: próbki traktujemy jako (w przybliżeniu) niezależne w skali jednego ticka monitora – rzeczywista autokorelacja może zawyżać efektywną niepewność (szersze realne CI).
+
+- Średnia: $\bar{x} = \frac{1}{n} \sum_{i=1}^{n} x_i$
+- Odchylenie std: $s = \sqrt{\frac{1}{n-1} \sum_{i=1}^{n} (x_i-\bar{x})^2}$
+- Błąd standardowy: $SE = \frac{s}{\sqrt{n}}$
+- 95% CI (aproks. normalna przy $n\ge 8$): $CI_{95} = 1.96\cdot SE$ → raportujemy jako `± CI95`.
+
+Jeśli n < 8 CI traktuj orientacyjnie (rozrzut może nie być dobrze oszacowany). W raportach safe/quick n bywa małe — dlatego zalecane są powtórzenia (`repeats ≥2`) i dłuższe biegi dla finalnych wniosków. Wartości per-client wynikają z deterministycznej transformacji (dzielenie przez N lub kopiowanie wsRate), więc nie liczymy dla nich osobnych CI (redundancja).
+
+Źródła możliwych błędów:
+
+- Małe n → szerokie CI i niestabilność median / p95.
+- Korelacja sąsiednich próbek (tick << charakterystyczny czas zmian) obniża efektywną liczebność (nie korygujemy — uproszczenie).
+- Źródło „source-limited” (tempo Arduino/MQTT < nominalnych Hz) zaniża Rate i może zniekształcać porównania — wtedy interpretuj CPU/jitter/staleness, ale nie surowy Rate.
+
+Planowane rozszerzenia (przyszłe): test różnic dwóch średnich (np. t lub bootstrap) oraz estymacja efektu (np. różnica względna + CI) zamiast heurystyki nakładania się przedziałów.
+
+Uzasadnienie użycia normalnej aproksymacji: Centralne Twierdzenie Graniczne zapewnia zbieżność rozkładu średniej do normalnego przy rosnącym n; dla n ≥ ~8–10 i braku silnych outlierów stosujemy faktor 1.96. Dla bardzo małych prób (n<8) przedział traktujemy orientacyjnie (oznaczamy szerokie CI lub ostrzeżenie w walidacji).
+
+### 2e. Warunki rzetelnego porównania (fairness protocol)
+
+Aby porównanie WS vs HTTP było interpretowalne:
+
+1. Ten sam nominalny payload (B) i porównywalny Rate/cli (po normalizacji).
+1. Wyłączone lub jednakowo skonfigurowane emisje uboczne (`arduinoData`, `metrics`) podczas pomiarów porównawczych.
+1. Jednolity `MONITOR_TICK_MS` i odcięcia warmup/cooldown (albo =0 po obu stronach).
+1. Brak zmian konfiguracji systemowej między metodami w obrębie pary (CPU load, liczba klientów).
+1. Weryfikacja `fairPayload` i `sourceLimited` (obie flagi powinny być `TAK`/`NIE` symetrycznie — inaczej uważaj przy interpretacji Rate).
+1. Normalizacja „per klient” stosowana konsekwentnie: HTTP dzielone przez N, WS — nie dzielone w Rate (broadcast), Bytes/cli = Rate×Payload.
+1. Analiza powtórzeń: różnice istotne tylko gdy spójne w każdym rep i w zestawieniach wg obciążenia/klientów.
+
+Jeśli którykolwiek warunek naruszony, wynik traktuj jako eksploracyjny.
+
+### 2f. Instrumentacja E2E (source → ingest → emit)
+
+Definicje znaczków czasowych wykorzystywanych do metryk latencji end‑to‑end:
+
+- sourceTsMs — chwila „źródła” (czas publikacji danych z Arduino / syntetyczny driver ustawia timestamp).
+- ingestTsMs — moment przyjęcia/przetworzenia danych przez warstwę API (np. po odbiorze MQTT lub tuż przed przygotowaniem odpowiedzi HTTP).
+- emitTsMs — moment faktycznej emisji do klienta (wysłanie wsMsg lub zakończenie odpowiedzi HTTP).
+
+Wyznaczane metryki:
+
+- Ingest E2E [ms] = ingestTsMs − sourceTsMs (transport + kolejka do API),
+- Emit E2E [ms] = emitTsMs − sourceTsMs (pełna ścieżka do wypchnięcia/odpowiedzi).
+
+W trybach syntetycznych (sterownik WS / syntetyczny polling) symulujemy minimalne opóźnienia (1–3 ms) aby uzyskać niezerową dystrybucję i CI95, nie zaniżając innych metryk. Przy realnym Arduino/MQTT opóźnienia te będą odzwierciedlały faktyczne czasy przepływu (transport szeregowy, broker, kolejkowanie event loop, emisja).  
+Jeśli brak któregokolwiek znacznika (np. puste serie) raport pokazuje „0” (lub w przyszłości „—” po dodaniu guardów) – interpretuj wtedy jako: brak danych, a nie rzeczywiste zero.
+
+Uwagi metodologiczne:
+
+- Krótkie przebiegi i małe n powodują wąskie lub zerowe CI przy bardzo spójnych (syntetycznych) opóźnieniach — to oczekiwane.
+- Dla analiz porównawczych ws vs HTTP latencje E2E w środowisku syntetycznym mają mniejszą wagę niż jitter i staleness (te ostatnie lepiej różnicują protokoły).
+- Przy przejściu na realny strumień warto zebrać dłuższe serie (≥30 próbek) by CI były bardziej reprezentatywne.
+
+Teoretycznie jitter (odchylenie inter‑arrival) i staleness (wiek danych) to różne aspekty: (1) jitter mierzy stabilność interwałów; (2) staleness mierzy opóźnienie od źródła do konsumenta. Protokół push minimalizuje staleness, ale może mieć niewielki jitter gdy nadaje z jednego zegara. Polling ogranicza minimalne staleness do długości swojego interwału i wprowadza jitter głównie przez koalescencję timerów oraz scheduling.
+
 ## 3. Aparatura i środowisko
 
 - Arduino → MQTT broker → API (Node.js/Express, Socket.IO) → Dashboard (Next.js/MUI/ApexCharts).
@@ -208,14 +290,15 @@ Aktualizator wybiera najnowszy katalog po czasie modyfikacji (mtime), co eliminu
 
 <!-- AUTO-RESULTS:BEGIN -->
 
-Ostatni run: 2025-08-13T16-44-03-768Z
+Ostatni run: 2025-08-13T20-03-10-396Z
 
-Status: fair payload: TAK, source-limited: NIE, czas: 30s, tick: 200 ms, repeats: 2
+Status: fair payload: TAK, source-limited: NIE, czas: 6s, tick: 500 ms, repeats: 1
 
-Pliki: [sessions.csv](../api/benchmarks/2025-08-13T16-44-03-768Z/sessions.csv), [summary.json](../api/benchmarks/2025-08-13T16-44-03-768Z/summary.json), [README](../api/benchmarks/2025-08-13T16-44-03-768Z/README.md)
+Pliki: [sessions.csv](../api/benchmarks/2025-08-13T20-03-10-396Z/sessions.csv), [summary.json](../api/benchmarks/2025-08-13T20-03-10-396Z/summary.json), [README](../api/benchmarks/2025-08-13T20-03-10-396Z/README.md)
 
 Uwaga: tabele uporządkowane wg: Mode (WS, HTTP) → Hz → Obciążenie → Klienci.
 
+Uwaga (SAFE): krótki przebieg 0.5–1 Hz bez obciążenia; walidacja odchyleń Rate oznaczana jako WARN (nie FAIL), by unikać fałszywych negatywów przy małym n.
 Uwaga: Scenariusze z liczbą klientów = 0 mają różną semantykę: WS (push) emituje niezależnie od liczby klientów — per‑client raportujemy Rate/cli = Rate oraz Bytes/cli ≈ Rate×Payload; HTTP (pull) przy 0 klientach nie generuje żądań → pola per‑client są puste (—). Dlatego w porównaniach WS vs HTTP ("Zwycięzcy", tabele WS vs HTTP) wiersze HTTP z N=0 są pomijane.
 
 Uwaga (per klient): kolumny Rate/cli i Bytes/cli pokazują wartości znormalizowane per odbiorcę.
@@ -226,17 +309,6 @@ Uwaga (per klient): kolumny Rate/cli i Bytes/cli pokazują wartości znormalizow
   Uwaga (WS — egress): kolumna Egress est. szacuje łączny koszt sieci: WS ≈ Rate × Payload × N; HTTP ≈ Bytes/s (już zsumowane po klientach).
   Kluczowe porównania (TL;DR, zwycięzcy, tabele wizualne) stosują Rate/cli: w WS nie dzielimy przez N, w HTTP dzielimy przez N — dzięki temu liczby są porównywalne per użytkownik.
 
-Przykład interpretacji (ostatni run):
-
-- HTTP (c=50): Rate ≈ 49.97/s → Rate/cli ≈ 1.00/s; Bytes/s ≈ 17990 → Bytes/cli ≈ 360
-- WS (c=50): Rate ≈ 1.02/s → Rate/cli ≈ 1.02/s; Bytes/s ≈ 368 → Bytes/cli ≈ 368
-
-### TL;DR — szybkie porównanie WS vs HTTP (per klient)
-
-- Porównuj per klienta: Rate/cli i Bytes/cli; WS: Bytes/cli ≈ Rate × Payload; egress ≈ Rate × Payload × N.
-- Ten run (średnio): Rate/cli — WS 1.00 /s vs HTTP 0.99 /s; Jitter — WS 2.3 ms vs HTTP 158.2 ms; Staleness — WS 481 ms vs HTTP 482 ms; CPU — WS 28.7% vs HTTP 25.6%.
-- Gdy 95% CI (Metrologia) nakładają się, uznawaj różnice za niejednoznaczne.
-
 ### Jak interpretować wyniki (protokół rzetelnego porównania)
 
 - Porównuj per klienta: Rate/cli (wyżej = lepiej), Jitter i Staleness (niżej = lepiej), CPU i RSS (niżej = lepiej).
@@ -246,81 +318,22 @@ Przykład interpretacji (ostatni run):
   - Jitter/Staleness: różnica ≥ 20% (lub ≥ 50 ms gdy wartości są rzędu setek ms).
   - CPU: różnice < 3–5 pp przy niskich obciążeniach to często szum; > 5–7 pp — potencjalnie istotne.
   - RSS: różnice < 10 MB zwykle pomijalne w tym kontekście, chyba że utrzymują się we wszystkich scenariuszach.
-- Spójność: uznaj różnicę za „realną”, jeśli powtarza się w obu powtórzeniach oraz w agregatach „wg obciążenia” i „wg liczby klientów”.
+- Spójność: uznaj różnicę za „realną”, jeśli powtarza się w obu powtórzeniach oraz w zestawieniach „wg obciążenia” i „wg liczby klientów”.
 - Semantyka WS vs HTTP: dla kosztu sieci WS oszacuj egress ≈ Rate × Payload × N (na wszystkich klientów); dla HTTP Bytes/s już zawiera sumę po klientach.
 
-| Label                                               |    Mode | Rate/cli [/s] | Bytes/cli [B/s] | Jitter [ms] | Staleness [ms] | CPU [%] | RSS [MB] |
-| --------------------------------------------------- | ------: | ------------: | --------------: | ----------: | -------------: | ------: | -------: |
-| WS@1Hz payload=360B cWs=1 [rep 1/2]                 |      ws |          1.08 |             388 |         1.6 |            511 |     3.1 |    201.7 |
-| WS@1Hz payload=360B cWs=1 [rep 2/2]                 |      ws |          0.99 |             355 |         7.6 |            492 |     1.0 |    184.3 |
-| WS@1Hz payload=360B cWs=10 [rep 1/2]                |      ws |          0.99 |             358 |         0.8 |            462 |     1.4 |    185.1 |
-| WS@1Hz payload=360B cWs=10 [rep 2/2]                |      ws |          0.99 |             358 |         0.8 |            526 |     1.7 |    185.5 |
-| WS@1Hz payload=360B cWs=25 [rep 1/2]                |      ws |          1.00 |             360 |         1.0 |            493 |     2.2 |    193.0 |
-| WS@1Hz payload=360B cWs=25 [rep 2/2]                |      ws |          0.99 |             356 |         1.2 |            450 |     2.0 |    194.6 |
-| WS@1Hz payload=360B cWs=50 [rep 1/2]                |      ws |          0.97 |             350 |         1.2 |            496 |     8.3 |    198.1 |
-| WS@1Hz payload=360B cWs=50 [rep 2/2]                |      ws |          1.01 |             363 |         2.2 |            460 |     5.9 |    207.4 |
-| WS@1Hz payload=360B + load=50% cWs=1 [rep 1/2]      |      ws |          0.99 |             358 |         0.9 |            483 |    47.1 |    222.9 |
-| WS@1Hz payload=360B + load=50% cWs=1 [rep 2/2]      |      ws |          0.99 |             356 |         5.4 |            508 |    50.7 |    222.3 |
-| WS@1Hz payload=360B + load=50% cWs=10 [rep 1/2]     |      ws |          0.98 |             351 |         1.9 |            566 |    51.3 |    220.1 |
-| WS@1Hz payload=360B + load=50% cWs=10 [rep 2/2]     |      ws |          0.99 |             357 |         3.1 |            488 |    51.0 |    223.9 |
-| WS@1Hz payload=360B + load=50% cWs=25 [rep 1/2]     |      ws |          1.01 |             363 |         1.7 |            401 |    54.8 |    222.8 |
-| WS@1Hz payload=360B + load=50% cWs=25 [rep 2/2]     |      ws |          1.00 |             359 |         1.2 |            524 |    56.9 |    223.6 |
-| WS@1Hz payload=360B + load=50% cWs=50 [rep 1/2]     |      ws |          1.02 |             368 |         3.3 |            319 |    60.6 |    228.3 |
-| WS@1Hz payload=360B + load=50% cWs=50 [rep 2/2]     |      ws |          1.00 |             361 |         3.0 |            517 |    61.9 |    233.0 |
-| HTTP@1Hz payload=360B cHttp=1 [rep 1/2]             | polling |          0.98 |             355 |         3.4 |            445 |     1.0 |    184.5 |
-| HTTP@1Hz payload=360B cHttp=1 [rep 2/2]             | polling |          1.01 |             364 |         7.7 |            469 |     1.1 |    184.5 |
-| HTTP@1Hz payload=360B cHttp=10 [rep 1/2]            | polling |          1.01 |             362 |       293.0 |            485 |     1.2 |    185.6 |
-| HTTP@1Hz payload=360B cHttp=10 [rep 2/2]            | polling |          0.99 |             358 |       292.8 |            516 |     1.1 |    185.7 |
-| HTTP@1Hz payload=360B cHttp=25 [rep 1/2]            | polling |          1.00 |             358 |       193.3 |            480 |     0.9 |    196.3 |
-| HTTP@1Hz payload=360B cHttp=25 [rep 2/2]            | polling |          0.99 |             358 |       192.8 |            452 |     1.2 |    194.4 |
-| HTTP@1Hz payload=360B cHttp=50 [rep 1/2]            | polling |          1.00 |             360 |       140.5 |            478 |     1.5 |    210.5 |
-| HTTP@1Hz payload=360B cHttp=50 [rep 2/2]            | polling |          1.01 |             364 |       140.1 |            456 |     1.2 |    210.9 |
-| HTTP@1Hz payload=360B + load=50% cHttp=1 [rep 1/2]  | polling |          1.00 |             360 |         4.0 |            449 |    49.7 |    222.8 |
-| HTTP@1Hz payload=360B + load=50% cHttp=1 [rep 2/2]  | polling |          0.99 |             357 |         8.3 |            470 |    50.3 |    222.0 |
-| HTTP@1Hz payload=360B + load=50% cHttp=10 [rep 1/2] | polling |          0.97 |             349 |       293.1 |            510 |    51.9 |    224.0 |
-| HTTP@1Hz payload=360B + load=50% cHttp=10 [rep 2/2] | polling |          1.00 |             360 |       294.7 |            431 |    50.0 |    224.0 |
-| HTTP@1Hz payload=360B + load=50% cHttp=25 [rep 1/2] | polling |          0.95 |             342 |       193.7 |            518 |    50.3 |    217.9 |
-| HTTP@1Hz payload=360B + load=50% cHttp=25 [rep 2/2] | polling |          1.01 |             362 |       193.3 |            485 |    50.9 |    218.2 |
-| HTTP@1Hz payload=360B + load=50% cHttp=50 [rep 1/2] | polling |          0.99 |             357 |       140.4 |            500 |    47.3 |    224.6 |
-| HTTP@1Hz payload=360B + load=50% cHttp=50 [rep 2/2] | polling |          0.96 |             347 |       140.5 |            565 |    49.2 |    224.6 |
+| Label                           |    Mode | Rate/cli [/s] | Bytes/cli [B/s] | Jitter [ms] | Staleness [ms] | CPU [%] | RSS [MB] |
+| ------------------------------- | ------: | ------------: | --------------: | ----------: | -------------: | ------: | -------: |
+| WS@1Hz payload=360B [rep 1/1]   |      ws |          1.30 |             467 |         3.6 |            417 |     1.8 |    209.0 |
+| HTTP@1Hz payload=360B [rep 1/1] | polling |          1.41 |             508 |         2.9 |            312 |     2.1 |    209.1 |
 
+<!-- markdownlint-disable MD033 -->
 <details>
 <summary>Szczegóły (pełna tabela)</summary>
 
-| Label                                               |    Mode | Rate [/s] | Rate/cli [/s] | Bytes/s | Bytes/cli [B/s] | Egress est. [B/s] | ~Payload [B] | Jitter [ms] | Staleness [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] | n (used/total) | Rate OK | Payload OK |
-| --------------------------------------------------- | ------: | --------: | ------------: | ------: | --------------: | ----------------: | -----------: | ----------: | -------------: | -----------: | ------: | -------: | :------------: | :-----: | :--------: |
-| WS@1Hz payload=360B cWs=1 [rep 1/2]                 |      ws |      1.08 |          1.08 |     388 |             388 |               388 |          360 |         1.6 |            511 |         34.6 |     3.1 |    201.7 |     14/15      |   ✅    |     ✅     |
-| WS@1Hz payload=360B cWs=1 [rep 2/2]                 |      ws |      0.99 |          0.99 |     355 |             355 |               355 |          360 |         7.6 |            492 |         33.4 |     1.0 |    184.3 |     14/16      |   ✅    |     ✅     |
-| WS@1Hz payload=360B cWs=10 [rep 1/2]                |      ws |      0.99 |          0.99 |     358 |             358 |              3578 |          360 |         0.8 |            462 |         33.6 |     1.4 |    185.1 |     14/16      |   ✅    |     ✅     |
-| WS@1Hz payload=360B cWs=10 [rep 2/2]                |      ws |      0.99 |          0.99 |     358 |             358 |              3578 |          360 |         0.8 |            526 |         36.2 |     1.7 |    185.5 |     15/17      |   ✅    |     ✅     |
-| WS@1Hz payload=360B cWs=25 [rep 1/2]                |      ws |      1.00 |          1.00 |     360 |             360 |              8989 |          360 |         1.0 |            493 |         35.1 |     2.2 |    193.0 |     14/17      |   ✅    |     ✅     |
-| WS@1Hz payload=360B cWs=25 [rep 2/2]                |      ws |      0.99 |          0.99 |     356 |             356 |              8909 |          360 |         1.2 |            450 |         38.7 |     2.0 |    194.6 |     14/16      |   ✅    |     ✅     |
-| WS@1Hz payload=360B cWs=50 [rep 1/2]                |      ws |      0.97 |          0.97 |     350 |             350 |             17516 |          360 |         1.2 |            496 |         34.7 |     8.3 |    198.1 |     14/16      |   ✅    |     ✅     |
-| WS@1Hz payload=360B cWs=50 [rep 2/2]                |      ws |      1.01 |          1.01 |     363 |             363 |             18156 |          360 |         2.2 |            460 |         34.8 |     5.9 |    207.4 |     15/17      |   ✅    |     ✅     |
-| WS@1Hz payload=360B + load=50% cWs=1 [rep 1/2]      |      ws |      0.99 |          0.99 |     358 |             358 |               358 |          360 |         0.9 |            483 |         37.3 |    47.1 |    222.9 |     14/16      |   ✅    |     ✅     |
-| WS@1Hz payload=360B + load=50% cWs=1 [rep 2/2]      |      ws |      0.99 |          0.99 |     356 |             356 |               356 |          360 |         5.4 |            508 |         32.5 |    50.7 |    222.3 |     14/17      |   ✅    |     ✅     |
-| WS@1Hz payload=360B + load=50% cWs=10 [rep 1/2]     |      ws |      0.98 |          0.98 |     351 |             351 |              3510 |          360 |         1.9 |            566 |         32.8 |    51.3 |    220.1 |     15/17      |   ✅    |     ✅     |
-| WS@1Hz payload=360B + load=50% cWs=10 [rep 2/2]     |      ws |      0.99 |          0.99 |     357 |             357 |              3568 |          360 |         3.1 |            488 |         34.4 |    51.0 |    223.9 |     14/16      |   ✅    |     ✅     |
-| WS@1Hz payload=360B + load=50% cWs=25 [rep 1/2]     |      ws |      1.01 |          1.01 |     363 |             363 |              9071 |          360 |         1.7 |            401 |         35.1 |    54.8 |    222.8 |     15/17      |   ✅    |     ✅     |
-| WS@1Hz payload=360B + load=50% cWs=25 [rep 2/2]     |      ws |      1.00 |          1.00 |     359 |             359 |              8966 |          360 |         1.2 |            524 |         35.0 |    56.9 |    223.6 |     14/17      |   ✅    |     ✅     |
-| WS@1Hz payload=360B + load=50% cWs=50 [rep 1/2]     |      ws |      1.02 |          1.02 |     368 |             368 |             18388 |          360 |         3.3 |            319 |         40.3 |    60.6 |    228.3 |     13/16      |   ✅    |     ✅     |
-| WS@1Hz payload=360B + load=50% cWs=50 [rep 2/2]     |      ws |      1.00 |          1.00 |     361 |             361 |             18042 |          360 |         3.0 |            517 |         43.4 |    61.9 |    233.0 |     15/17      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B cHttp=1 [rep 1/2]             | polling |      0.98 |          0.98 |     355 |             355 |               355 |          360 |         3.4 |            445 |         33.3 |     1.0 |    184.5 |     14/16      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B cHttp=1 [rep 2/2]             | polling |      1.01 |          1.01 |     364 |             364 |               364 |          360 |         7.7 |            469 |         33.2 |     1.1 |    184.5 |     14/16      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B cHttp=10 [rep 1/2]            | polling |     10.07 |          1.01 |    3623 |             362 |              3623 |          360 |       293.0 |            485 |         35.0 |     1.2 |    185.6 |     14/17      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B cHttp=10 [rep 2/2]            | polling |      9.93 |          0.99 |    3576 |             358 |              3576 |          360 |       292.8 |            516 |         34.7 |     1.1 |    185.7 |     15/17      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B cHttp=25 [rep 1/2]            | polling |     24.88 |          1.00 |    8958 |             358 |              8958 |          360 |       193.3 |            480 |         33.3 |     0.9 |    196.3 |     15/17      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B cHttp=25 [rep 2/2]            | polling |     24.87 |          0.99 |    8952 |             358 |              8952 |          360 |       192.8 |            452 |         36.2 |     1.2 |    194.4 |     15/17      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B cHttp=50 [rep 1/2]            | polling |     49.97 |          1.00 |   17990 |             360 |             17990 |          360 |       140.5 |            478 |         33.8 |     1.5 |    210.5 |     14/17      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B cHttp=50 [rep 2/2]            | polling |     50.55 |          1.01 |   18198 |             364 |             18198 |          360 |       140.1 |            456 |         33.0 |     1.2 |    210.9 |     15/17      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B + load=50% cHttp=1 [rep 1/2]  | polling |      1.00 |          1.00 |     360 |             360 |               360 |          360 |         4.0 |            449 |         33.9 |    49.7 |    222.8 |     14/17      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B + load=50% cHttp=1 [rep 2/2]  | polling |      0.99 |          0.99 |     357 |             357 |               357 |          360 |         8.3 |            470 |         33.0 |    50.3 |    222.0 |     14/17      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B + load=50% cHttp=10 [rep 1/2] | polling |      9.71 |          0.97 |    3494 |             349 |              3494 |          360 |       293.1 |            510 |         33.3 |    51.9 |    224.0 |     15/17      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B + load=50% cHttp=10 [rep 2/2] | polling |     10.01 |          1.00 |    3602 |             360 |              3602 |          360 |       294.7 |            431 |         34.0 |    50.0 |    224.0 |     14/16      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B + load=50% cHttp=25 [rep 1/2] | polling |     23.78 |          0.95 |    8561 |             342 |              8561 |          360 |       193.7 |            518 |         32.9 |    50.3 |    217.9 |     14/17      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B + load=50% cHttp=25 [rep 2/2] | polling |     25.13 |          1.01 |    9047 |             362 |              9047 |          360 |       193.3 |            485 |         33.5 |    50.9 |    218.2 |     15/17      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B + load=50% cHttp=50 [rep 1/2] | polling |     49.59 |          0.99 |   17852 |             357 |             17852 |          360 |       140.4 |            500 |         33.0 |    47.3 |    224.6 |     14/17      |   ✅    |     ✅     |
-| HTTP@1Hz payload=360B + load=50% cHttp=50 [rep 2/2] | polling |     48.23 |          0.96 |   17363 |             347 |             17363 |          360 |       140.5 |            565 |         32.7 |    49.2 |    224.6 |     14/17      |   ✅    |     ✅     |
+| Label                           |    Mode | Rate [/s] | Rate/cli [/s] | Bytes/s | Bytes/cli [B/s] | Egress est. [B/s] | ~Payload [B] | Jitter [ms] | Staleness [ms] | ELU p99 [ms] | CPU [%] | RSS [MB] | n (used/total) | Rate OK | Payload OK |
+| ------------------------------- | ------: | --------: | ------------: | ------: | --------------: | ----------------: | -----------: | ----------: | -------------: | -----------: | ------: | -------: | :------------: | :-----: | :--------: |
+| WS@1Hz payload=360B [rep 1/1]   |      ws |      1.30 |          1.30 |     467 |             467 |                 0 |          360 |         3.6 |            417 |         48.9 |     1.8 |    209.0 |      3/3       |   ✅    |     ✅     |
+| HTTP@1Hz payload=360B [rep 1/1] | polling |      1.41 |          1.41 |     508 |             508 |               508 |          360 |         2.9 |            312 |         51.2 |     2.1 |    209.1 |      3/3       |   ✅    |     ✅     |
 
 </details>
 
@@ -328,13 +341,13 @@ Parametry przyjęte w ostatnim runie:
 
 - Metody: ws, polling
 - Częstotliwości [Hz]: 1
-- Obciążenia CPU [%]: 0, 50
-- Czas sesji [s]: 30
-- MONITOR_TICK_MS: 200
+- Obciążenia CPU [%]: 0
+- Czas sesji [s]: 6
+- MONITOR_TICK_MS: 500
 - Payloady: WS=360B, HTTP=360B
-- Klienci: clientsHttp=1, clientsWs=1
-- Warmup/Cooldown [s]: 2 / 2
-- Repeats: 2
+- Klienci: clientsHttp=0, clientsWs=0
+- Warmup/Cooldown [s]: 0 / 0
+- Repeats: 1
 
 ## Uśrednione wyniki wg obciążenia
 
@@ -344,15 +357,13 @@ Uwaga: "Obciążenie" oznacza sztuczne obciążenie CPU procesu podczas sesji (g
 
 | Obciążenie | Rate/cli [/s] | Bytes/cli [B/s] | Jitter [ms] | Staleness [ms] | CPU [%] | RSS [MB] |
 | ---------: | ------------: | --------------: | ----------: | -------------: | ------: | -------: |
-|         0% |          1.00 |             361 |         2.0 |            486 |     3.2 |    193.7 |
-|        50% |          1.00 |             359 |         2.6 |            476 |    54.3 |    224.6 |
+|         0% |          1.30 |             467 |         3.6 |            417 |     1.8 |    209.0 |
 
 ### Porównanie wg obciążenia — HTTP polling
 
 | Obciążenie | Rate/cli [/s] | Bytes/cli [B/s] | Jitter [ms] | Staleness [ms] | CPU [%] | RSS [MB] |
 | ---------: | ------------: | --------------: | ----------: | -------------: | ------: | -------: |
-|         0% |          1.00 |             360 |       158.0 |            472 |     1.2 |    194.0 |
-|        50% |          0.98 |             354 |       158.5 |            491 |    49.9 |    222.2 |
+|         0% |          1.41 |             508 |         2.9 |            312 |     2.1 |    209.1 |
 
 ## Uśrednione wyniki wg liczby klientów
 
@@ -362,95 +373,22 @@ Uwaga: "Liczba klientów" to liczba równoległych syntetycznych klientów gener
 
 | Klienci | Rate/cli [/s] | Bytes/cli [B/s] | Jitter [ms] | Staleness [ms] | CPU [%] | RSS [MB] |
 | ------: | ------------: | --------------: | ----------: | -------------: | ------: | -------: |
-|       1 |          1.01 |             364 |         3.9 |            498 |    25.5 |    207.8 |
-|      10 |          0.99 |             356 |         1.6 |            511 |    26.3 |    203.7 |
-|      25 |          1.00 |             359 |         1.3 |            467 |    29.0 |    208.5 |
-|      50 |          1.00 |             361 |         2.4 |            448 |    34.2 |    216.7 |
+|       0 |          1.30 |             467 |         3.6 |            417 |     1.8 |    209.0 |
 
 ### Zestawienie wg liczby klientów — HTTP polling
 
 | Klienci | Rate/cli [/s] | Bytes/cli [B/s] | Jitter [ms] | Staleness [ms] | CPU [%] | RSS [MB] |
 | ------: | ------------: | --------------: | ----------: | -------------: | ------: | -------: |
-|       1 |          1.00 |             359 |         5.8 |            458 |    25.5 |    203.4 |
-|      10 |          0.99 |             357 |       293.4 |            485 |    26.1 |    204.8 |
-|      25 |          0.99 |             355 |       193.3 |            484 |    25.8 |    206.7 |
-|      50 |          0.99 |             357 |       140.4 |            500 |    24.8 |    217.7 |
+|       1 |          1.41 |             508 |         2.9 |            312 |     2.1 |    209.1 |
 
 ## Metrologia (95% CI) — ostatni run
 
-Niepewność średnich estymowana z próbek (tick ~ 200 ms).
+Niepewność średnich estymowana z próbek (tick ~ 500 ms).
 
-| Label                                     | n (used/total) | Rate [/s] | CI95 Rate | CI95/avg | σ(rate) | Median Rate | Bytes/s | CI95 Bytes | CI95/avg | σ(bytes) | Median Bytes |
-| ----------------------------------------- | :------------: | --------: | --------: | -------: | ------: | ----------: | ------: | ---------: | -------: | -------: | -----------: |
-| WS@1Hz payload=360B cWs=1                 |     14/15      |      1.08 |    ± 0.41 |      38% |    5.06 |        1.11 |     388 |      ± 146 |      38% |     1821 |          400 |
-| WS@1Hz payload=360B cWs=1                 |     14/16      |      0.99 |    ± 0.39 |      39% |    0.23 |        1.08 |     355 |      ± 139 |      39% |       83 |          387 |
-| WS@1Hz payload=360B cWs=10                |     14/16      |      0.99 |    ± 0.38 |      38% |    0.20 |        1.04 |     358 |      ± 138 |      38% |       71 |          374 |
-| WS@1Hz payload=360B cWs=10                |     15/17      |      0.99 |    ± 0.37 |      38% |    0.23 |        1.11 |     358 |      ± 135 |      38% |       84 |          400 |
-| WS@1Hz payload=360B cWs=25                |     14/17      |      1.00 |    ± 0.39 |      39% |    0.23 |        1.10 |     360 |      ± 141 |      39% |       83 |          397 |
-| WS@1Hz payload=360B cWs=25                |     14/16      |      0.99 |    ± 0.39 |      39% |    0.24 |        1.10 |     356 |      ± 140 |      39% |       86 |          396 |
-| WS@1Hz payload=360B cWs=50                |     14/16      |      0.97 |    ± 0.37 |      38% |    0.20 |        1.05 |     350 |      ± 135 |      38% |       70 |          377 |
-| WS@1Hz payload=360B cWs=50                |     15/17      |      1.01 |    ± 0.38 |      38% |    0.24 |        1.12 |     363 |      ± 137 |      38% |       86 |          404 |
-| WS@1Hz payload=360B + load=50% cWs=1      |     14/16      |      0.99 |    ± 0.39 |      39% |    0.24 |        1.11 |     358 |      ± 140 |      39% |       87 |          401 |
-| WS@1Hz payload=360B + load=50% cWs=1      |     14/17      |      0.99 |    ± 0.39 |      39% |    0.24 |        1.10 |     356 |      ± 140 |      39% |       85 |          396 |
-| WS@1Hz payload=360B + load=50% cWs=10     |     15/17      |      0.98 |    ± 0.37 |      38% |    0.26 |        1.12 |     351 |      ± 135 |      38% |       93 |          403 |
-| WS@1Hz payload=360B + load=50% cWs=10     |     14/16      |      0.99 |    ± 0.39 |      39% |    0.24 |        1.10 |     357 |      ± 140 |      39% |       87 |          398 |
-| WS@1Hz payload=360B + load=50% cWs=25     |     15/17      |      1.01 |    ± 0.38 |      38% |    0.24 |        1.13 |     363 |      ± 137 |      38% |       85 |          406 |
-| WS@1Hz payload=360B + load=50% cWs=25     |     14/17      |      1.00 |    ± 0.39 |      39% |    0.23 |        1.11 |     359 |      ± 141 |      39% |       84 |          399 |
-| WS@1Hz payload=360B + load=50% cWs=50     |     13/16      |      1.02 |    ± 0.40 |      39% |    0.16 |        1.08 |     368 |      ± 144 |      39% |       58 |          387 |
-| WS@1Hz payload=360B + load=50% cWs=50     |     15/17      |      1.00 |    ± 0.38 |      38% |    0.23 |        1.11 |     361 |      ± 136 |      38% |       83 |          399 |
-| HTTP@1Hz payload=360B cHttp=1             |     14/16      |      0.98 |    ± 0.39 |      39% |    0.24 |        1.10 |     355 |      ± 139 |      39% |       85 |          395 |
-| HTTP@1Hz payload=360B cHttp=1             |     14/16      |      1.01 |    ± 0.39 |      38% |    0.20 |        1.08 |     364 |      ± 140 |      38% |       71 |          389 |
-| HTTP@1Hz payload=360B cHttp=10            |     14/17      |     10.07 |    ± 1.28 |      13% |    2.44 |       11.22 |    3623 |      ± 461 |      13% |      880 |         4038 |
-| HTTP@1Hz payload=360B cHttp=10            |     15/17      |      9.93 |    ± 1.13 |      11% |    2.23 |       11.02 |    3576 |      ± 407 |      11% |      805 |         3966 |
-| HTTP@1Hz payload=360B cHttp=25            |     15/17      |     24.88 |    ± 2.88 |      12% |    5.69 |       27.69 |    8958 |     ± 1036 |      12% |     2048 |         9969 |
-| HTTP@1Hz payload=360B cHttp=25            |     15/17      |     24.87 |    ± 2.86 |      11% |    5.64 |       27.50 |    8952 |     ± 1028 |      11% |     2031 |         9899 |
-| HTTP@1Hz payload=360B cHttp=50            |     14/17      |     49.97 |    ± 6.25 |      13% |   11.93 |       55.69 |   17990 |     ± 2249 |      13% |     4293 |        20050 |
-| HTTP@1Hz payload=360B cHttp=50            |     15/17      |     50.55 |    ± 5.89 |      12% |   11.64 |       55.47 |   18198 |     ± 2120 |      12% |     4190 |        19969 |
-| HTTP@1Hz payload=360B + load=50% cHttp=1  |     14/17      |      1.00 |    ± 0.39 |      39% |    0.24 |        1.12 |     360 |      ± 141 |      39% |       88 |          404 |
-| HTTP@1Hz payload=360B + load=50% cHttp=1  |     14/17      |      0.99 |    ± 0.39 |      39% |    0.24 |        1.10 |     357 |      ± 140 |      39% |       85 |          398 |
-| HTTP@1Hz payload=360B + load=50% cHttp=10 |     15/17      |      9.71 |    ± 1.30 |      13% |    2.58 |       11.08 |    3494 |      ± 469 |      13% |      927 |         3990 |
-| HTTP@1Hz payload=360B + load=50% cHttp=10 |     14/16      |     10.01 |    ± 1.26 |      13% |    2.40 |       11.19 |    3602 |      ± 452 |      13% |      863 |         4030 |
-| HTTP@1Hz payload=360B + load=50% cHttp=25 |     14/17      |     23.78 |    ± 3.43 |      14% |    6.54 |       27.60 |    8561 |     ± 1234 |      14% |     2355 |         9938 |
-| HTTP@1Hz payload=360B + load=50% cHttp=25 |     15/17      |     25.13 |    ± 2.93 |      12% |    5.79 |       27.74 |    9047 |     ± 1054 |      12% |     2083 |         9988 |
-| HTTP@1Hz payload=360B + load=50% cHttp=50 |     14/17      |     49.59 |    ± 6.13 |      12% |   11.71 |       54.98 |   17852 |     ± 2207 |      12% |     4214 |        19794 |
-| HTTP@1Hz payload=360B + load=50% cHttp=50 |     14/17      |     48.23 |    ± 6.78 |      14% |   12.94 |       55.47 |   17363 |     ± 2440 |      14% |     4657 |        19968 |
-
-## E2E latency (źródło→ingest→emit) [ms]
-
-| Label                                     | Src→Ingest avg | Src→Ingest p95 | Ingest→Emit avg | Ingest→Emit p95 | Src→Emit avg | Src→Emit p95 |
-| ----------------------------------------- | -------------: | -------------: | --------------: | --------------: | -----------: | -----------: |
-| WS@1Hz payload=360B cWs=1                 |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| WS@1Hz payload=360B cWs=1                 |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| WS@1Hz payload=360B cWs=10                |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| WS@1Hz payload=360B cWs=10                |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| WS@1Hz payload=360B cWs=25                |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| WS@1Hz payload=360B cWs=25                |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| WS@1Hz payload=360B cWs=50                |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| WS@1Hz payload=360B cWs=50                |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| WS@1Hz payload=360B + load=50% cWs=1      |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| WS@1Hz payload=360B + load=50% cWs=1      |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| WS@1Hz payload=360B + load=50% cWs=10     |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| WS@1Hz payload=360B + load=50% cWs=10     |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| WS@1Hz payload=360B + load=50% cWs=25     |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| WS@1Hz payload=360B + load=50% cWs=25     |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| WS@1Hz payload=360B + load=50% cWs=50     |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| WS@1Hz payload=360B + load=50% cWs=50     |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B cHttp=1             |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B cHttp=1             |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B cHttp=10            |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B cHttp=10            |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B cHttp=25            |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B cHttp=25            |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B cHttp=50            |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B cHttp=50            |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B + load=50% cHttp=1  |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B + load=50% cHttp=1  |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B + load=50% cHttp=10 |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B + load=50% cHttp=10 |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B + load=50% cHttp=25 |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B + load=50% cHttp=25 |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B + load=50% cHttp=50 |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
-| HTTP@1Hz payload=360B + load=50% cHttp=50 |            0.0 |            0.0 |             0.0 |             0.0 |          0.0 |          0.0 |
+| Label                 | n (used/total) | Rate [/s] | CI95 Rate | CI95/avg | σ(rate) | Median Rate | Bytes/s | CI95 Bytes | CI95/avg | σ(bytes) | Median Bytes | Jitter [ms] | CI95 Jitter | σ(jitter) | Stal [ms] | CI95 Stal | σ(stal) | Median Stal | p95 Stal | Ingest E2E [ms] | CI95 Ingest | Emit E2E [ms] | CI95 Emit |
+| --------------------- | :------------: | --------: | --------: | -------: | ------: | ----------: | ------: | ---------: | -------: | -------: | -----------: | ----------: | ----------: | --------: | --------: | --------: | ------: | ----------: | -------: | --------------: | ----------: | ------------: | --------: |
+| WS@1Hz payload=360B   |      3/3       |      1.30 |    ± 1.04 |      80% |    3.01 |        1.14 |     467 |      ± 374 |      80% |     1082 |          410 |         3.6 |       ± 0.6 |       0.6 |       417 |     ± 338 |     299 |         504 |      662 |               0 |         ± 0 |             0 |       ± 0 |
+| HTTP@1Hz payload=360B |      3/3       |      1.41 |    ± 1.24 |      88% |    2.86 |        1.35 |     508 |      ± 445 |      88% |     1030 |          485 |         2.9 |       ± 2.9 |       2.5 |       312 |     ± 306 |     271 |         410 |      520 |               0 |         ± 0 |             0 |       ± 0 |
 
 ### Metrologia — jak czytać i co oznaczają wyniki
 
@@ -467,142 +405,21 @@ Niepewność średnich estymowana z próbek (tick ~ 200 ms).
   - n(used) ≥ 10, CI95/średnia (Rate) < 30%, CI95/średnia (Bytes/s) < 30%.
   - Relacja Bytes≈Rate×Payload: błąd względny < 30% dla przebiegów kontrolowanych.
 
-## Porównania parowane (WS vs HTTP, per klient, z Δ i istotnością)
-
-Legenda: Δ% = (WS−HTTP)/HTTP·100%; Istotność (95% CI): "sig" gdy przedziały [mean±CI] dla Rate/cli nie nachodzą się (dla HTTP CI skalowane 1/N).
-
-| Scenariusz | Rate/cli WS [/s] | Rate/cli HTTP [/s] | Δ Rate/cli [%] | Istotność (95% CI) | Jitter WS [ms] | Jitter HTTP [ms] | Δ Jitter [%] | Staleness WS [ms] | Staleness HTTP [ms] | Δ Stal. [%] | CPU WS [%] | CPU HTTP [%] | Δ CPU [pp] | RSS WS [MB] | RSS HTTP [MB] | Δ RSS [MB] |
-| ---------- | ---------------: | -----------------: | -------------: | :----------------: | -------------: | ---------------: | -----------: | ----------------: | ------------------: | ----------: | ---------: | -----------: | ---------: | ----------: | ------------: | ---------- | ----- | ---- |
-| Hz=1       |           Load=0 |          Clients=1 |           0.99 |        1.01        |            -2% |               ns |          7.6 |               7.7 |                 -2% |         492 |        469 |           5% |        1.0 |         1.1 |          -0.1 | 184.3      | 184.5 | -0.1 |
-| Hz=1       |           Load=0 |         Clients=10 |           0.99 |        0.99        |             0% |               ns |          0.8 |             292.8 |               -100% |         526 |        516 |           2% |        1.7 |         1.1 |           0.5 | 185.5      | 185.7 | -0.2 |
-| Hz=1       |           Load=0 |         Clients=25 |           0.99 |        0.99        |            -0% |               ns |          1.2 |             192.8 |                -99% |         450 |        452 |          -1% |        2.0 |         1.2 |           0.8 | 194.6      | 194.4 | 0.2  |
-| Hz=1       |           Load=0 |         Clients=50 |           1.01 |        1.01        |            -0% |               ns |          2.2 |             140.1 |                -98% |         460 |        456 |           1% |        5.9 |         1.2 |           4.7 | 207.4      | 210.9 | -3.6 |
-| Hz=1       |          Load=50 |          Clients=1 |           0.99 |        0.99        |            -0% |               ns |          5.4 |               8.3 |                -35% |         508 |        470 |           8% |       50.7 |        50.3 |           0.4 | 222.3      | 222.0 | 0.3  |
-| Hz=1       |          Load=50 |         Clients=10 |           0.99 |        1.00        |            -1% |               ns |          3.1 |             294.7 |                -99% |         488 |        431 |          13% |       51.0 |        50.0 |           1.0 | 223.9      | 224.0 | -0.1 |
-| Hz=1       |          Load=50 |         Clients=25 |           1.00 |        1.01        |            -1% |               ns |          1.2 |             193.3 |                -99% |         524 |        485 |           8% |       56.9 |        50.9 |           5.9 | 223.6      | 218.2 | 5.5  |
-| Hz=1       |          Load=50 |         Clients=50 |           1.00 |        0.96        |             4% |               ns |          3.0 |             140.5 |                -98% |         517 |        565 |          -8% |       61.9 |        49.2 |          12.8 | 233.0      | 224.6 | 8.4  |
-
 ## Wnioski (syntetyczne)
 
-- WS@1Hz payload=360B cWs=1 [rep 1/2]: rate=1.08 in [0.50, 1.50] (c=1); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- WS@1Hz payload=360B cWs=1 [rep 2/2]: rate=0.99 in [0.50, 1.50] (c=1); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- WS@1Hz payload=360B cWs=10 [rep 1/2]: rate=0.99 in [0.50, 1.50] (c=10); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- WS@1Hz payload=360B cWs=10 [rep 2/2]: rate=0.99 in [0.50, 1.50] (c=10); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- WS@1Hz payload=360B cWs=25 [rep 1/2]: rate=1.00 in [0.50, 1.50] (c=25); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- WS@1Hz payload=360B cWs=25 [rep 2/2]: rate=0.99 in [0.50, 1.50] (c=25); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- WS@1Hz payload=360B cWs=50 [rep 1/2]: rate=0.97 in [0.50, 1.50] (c=50); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- WS@1Hz payload=360B cWs=50 [rep 2/2]: rate=1.01 in [0.50, 1.50] (c=50); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- WS@1Hz payload=360B + load=50% cWs=1 [rep 1/2]: rate=0.99 in [0.50, 1.50] (c=1); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- WS@1Hz payload=360B + load=50% cWs=1 [rep 2/2]: rate=0.99 in [0.50, 1.50] (c=1); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- WS@1Hz payload=360B + load=50% cWs=10 [rep 1/2]: rate=0.98 in [0.50, 1.50] (c=10); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- WS@1Hz payload=360B + load=50% cWs=10 [rep 2/2]: rate=0.99 in [0.50, 1.50] (c=10); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- WS@1Hz payload=360B + load=50% cWs=25 [rep 1/2]: rate=1.01 in [0.50, 1.50] (c=25); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- WS@1Hz payload=360B + load=50% cWs=25 [rep 2/2]: rate=1.00 in [0.50, 1.50] (c=25); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- WS@1Hz payload=360B + load=50% cWs=50 [rep 1/2]: rate=1.02 in [0.50, 1.50] (c=50); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- WS@1Hz payload=360B + load=50% cWs=50 [rep 2/2]: rate=1.00 in [0.50, 1.50] (c=50); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B cHttp=1 [rep 1/2]: rate=0.98 in [0.50, 1.50] (c=1); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B cHttp=1 [rep 2/2]: rate=1.01 in [0.50, 1.50] (c=1); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B cHttp=10 [rep 1/2]: rate=10.07 in [5.00, 15.00] (c=10); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B cHttp=10 [rep 2/2]: rate=9.93 in [5.00, 15.00] (c=10); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B cHttp=25 [rep 1/2]: rate=24.88 in [12.50, 37.50] (c=25); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B cHttp=25 [rep 2/2]: rate=24.87 in [12.50, 37.50] (c=25); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B cHttp=50 [rep 1/2]: rate=49.97 in [25.00, 75.00] (c=50); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B cHttp=50 [rep 2/2]: rate=50.55 in [25.00, 75.00] (c=50); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B + load=50% cHttp=1 [rep 1/2]: rate=1.00 in [0.50, 1.50] (c=1); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B + load=50% cHttp=1 [rep 2/2]: rate=0.99 in [0.50, 1.50] (c=1); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B + load=50% cHttp=10 [rep 1/2]: rate=9.71 in [5.00, 15.00] (c=10); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B + load=50% cHttp=10 [rep 2/2]: rate=10.01 in [5.00, 15.00] (c=10); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B + load=50% cHttp=25 [rep 1/2]: rate=23.78 in [12.50, 37.50] (c=25); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B + load=50% cHttp=25 [rep 2/2]: rate=25.13 in [12.50, 37.50] (c=25); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B + load=50% cHttp=50 [rep 1/2]: rate=49.59 in [25.00, 75.00] (c=50); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
-- HTTP@1Hz payload=360B + load=50% cHttp=50 [rep 2/2]: rate=48.23 in [25.00, 75.00] (c=50); bytesPerUnit=360.0 in [180.0, 540.0] (trim: warmup=2s, cooldown=2s)
+- WS@1Hz payload=360B [rep 1/1]: rate=1.30 in [0.50, 1.50] (c=1); bytesPerUnit=360.0 in [180.0, 540.0] [N/A w porównaniach]
+- HTTP@1Hz payload=360B [rep 1/1]: rate=1.41 in [0.50, 1.50] (c=1); bytesPerUnit=360.0 in [180.0, 540.0]
 
 ## Walidacja wiarygodności i poprawności
 
 Brak pliku validation.txt dla ostatniego runu.
 
-- Rate OK: 100% (32/32)
-- Payload OK: 100% (32/32)
-- Minimalna liczba próbek n(used): 13
-- Średni względny CI95: Rate ≈ 29%, Bytes/s ≈ 29%
+- Rate OK: 100% (2/2)
+- Payload OK: 100% (2/2)
+- Minimalna liczba próbek n(used): 3
+- Średni względny CI95: Rate ≈ 84%, Bytes/s ≈ 84%
 
 Uwaga: FAIL wynika głównie z odchyleń Rate od oczekiwanych Hz. To spodziewane, jeśli źródło danych (Arduino/MQTT) publikuje ~1 Hz niezależnie od ustawień nominalnych. Payload przechodzi (OK) we wszystkich scenariuszach.
-
-## Zwycięzcy (per scenariusz)
-
-Dla każdej kombinacji Hz/obciążenia/liczby klientów wskazano najlepszą metodę w kluczowych kategoriach.
-
-### Zwycięzcy — Hz=1|Load=0|Clients=1
-
-- Częstość [#/s] (per klient): WS (WS@1Hz payload=360B cWs=1) (≈ 1.08)
-- Jitter [ms]: WS (WS@1Hz payload=360B cWs=1) (≈ 1.6)
-- Staleness [ms]: POLLING (HTTP@1Hz payload=360B cHttp=1) (≈ 445.2)
-- CPU [%]: POLLING (HTTP@1Hz payload=360B cHttp=1) (≈ 1.0)
-- RSS [MB]: WS (WS@1Hz payload=360B cWs=1) (≈ 184.3)
-
-### Zwycięzcy — Hz=1|Load=0|Clients=10
-
-- Częstość [#/s] (per klient): POLLING (HTTP@1Hz payload=360B cHttp=10) (≈ 1.01)
-- Jitter [ms]: WS (WS@1Hz payload=360B cWs=10) (≈ 0.8)
-- Staleness [ms]: WS (WS@1Hz payload=360B cWs=10) (≈ 462.1)
-- CPU [%]: POLLING (HTTP@1Hz payload=360B cHttp=10) (≈ 1.1)
-- RSS [MB]: WS (WS@1Hz payload=360B cWs=10) (≈ 185.1)
-
-### Zwycięzcy — Hz=1|Load=0|Clients=25
-
-- Częstość [#/s] (per klient): WS (WS@1Hz payload=360B cWs=25) (≈ 1.00)
-- Jitter [ms]: WS (WS@1Hz payload=360B cWs=25) (≈ 1.0)
-- Staleness [ms]: WS (WS@1Hz payload=360B cWs=25) (≈ 449.9)
-- CPU [%]: POLLING (HTTP@1Hz payload=360B cHttp=25) (≈ 0.9)
-- RSS [MB]: WS (WS@1Hz payload=360B cWs=25) (≈ 193.0)
-
-### Zwycięzcy — Hz=1|Load=0|Clients=50
-
-- Częstość [#/s] (per klient): POLLING (HTTP@1Hz payload=360B cHttp=50) (≈ 1.01)
-- Jitter [ms]: WS (WS@1Hz payload=360B cWs=50) (≈ 1.2)
-- Staleness [ms]: POLLING (HTTP@1Hz payload=360B cHttp=50) (≈ 456.1)
-- CPU [%]: POLLING (HTTP@1Hz payload=360B cHttp=50) (≈ 1.2)
-- RSS [MB]: WS (WS@1Hz payload=360B cWs=50) (≈ 198.1)
-
-### Zwycięzcy — Hz=1|Load=50|Clients=1
-
-- Częstość [#/s] (per klient): POLLING (HTTP@1Hz payload=360B + load=50% cHttp=1) (≈ 1.00)
-- Jitter [ms]: WS (WS@1Hz payload=360B + load=50% cWs=1) (≈ 0.9)
-- Staleness [ms]: POLLING (HTTP@1Hz payload=360B + load=50% cHttp=1) (≈ 448.6)
-- CPU [%]: WS (WS@1Hz payload=360B + load=50% cWs=1) (≈ 47.1)
-- RSS [MB]: POLLING (HTTP@1Hz payload=360B + load=50% cHttp=1) (≈ 222.0)
-
-### Zwycięzcy — Hz=1|Load=50|Clients=10
-
-- Częstość [#/s] (per klient): POLLING (HTTP@1Hz payload=360B + load=50% cHttp=10) (≈ 1.00)
-- Jitter [ms]: WS (WS@1Hz payload=360B + load=50% cWs=10) (≈ 1.9)
-- Staleness [ms]: POLLING (HTTP@1Hz payload=360B + load=50% cHttp=10) (≈ 431.2)
-- CPU [%]: POLLING (HTTP@1Hz payload=360B + load=50% cHttp=10) (≈ 50.0)
-- RSS [MB]: WS (WS@1Hz payload=360B + load=50% cWs=10) (≈ 220.1)
-
-### Zwycięzcy — Hz=1|Load=50|Clients=25
-
-- Częstość [#/s] (per klient): WS (WS@1Hz payload=360B + load=50% cWs=25) (≈ 1.01)
-- Jitter [ms]: WS (WS@1Hz payload=360B + load=50% cWs=25) (≈ 1.2)
-- Staleness [ms]: WS (WS@1Hz payload=360B + load=50% cWs=25) (≈ 400.6)
-- CPU [%]: POLLING (HTTP@1Hz payload=360B + load=50% cHttp=25) (≈ 50.3)
-- RSS [MB]: POLLING (HTTP@1Hz payload=360B + load=50% cHttp=25) (≈ 217.9)
-
-### Zwycięzcy — Hz=1|Load=50|Clients=50
-
-- Częstość [#/s] (per klient): WS (WS@1Hz payload=360B + load=50% cWs=50) (≈ 1.02)
-- Jitter [ms]: WS (WS@1Hz payload=360B + load=50% cWs=50) (≈ 3.0)
-- Staleness [ms]: WS (WS@1Hz payload=360B + load=50% cWs=50) (≈ 318.8)
-- CPU [%]: POLLING (HTTP@1Hz payload=360B + load=50% cHttp=50) (≈ 47.3)
-- RSS [MB]: POLLING (HTTP@1Hz payload=360B + load=50% cHttp=50) (≈ 224.6)
-
-### Podsumowanie globalne (średnio)
-
-- Rate/cli: WS 1.00 /s vs HTTP 0.99 /s
-- Jitter: WS 2.3 ms vs HTTP 158.2 ms (niżej lepiej)
-- Staleness: WS 481 ms vs HTTP 482 ms (niżej lepiej)
-- CPU: WS 28.7% vs HTTP 25.6% (niżej lepiej)
-- RSS: WS 209.2 MB vs HTTP 208.1 MB (niżej lepiej)
 
 ## Wnioski — wizualne porównanie
 
@@ -612,8 +429,7 @@ Legenda: Pogrubienia oznaczają korzystniejszą wartość w danej kolumnie (niż
 
 | Obciążenie [%] | Rate/cli WS [/s] | Rate/cli HTTP [/s] | Δ Rate/cli [%] | Jitter WS [ms] | Jitter HTTP [ms] | Staleness WS [ms] | Staleness HTTP [ms] | ELU p99 WS [ms] | ELU p99 HTTP [ms] | CPU WS [%] | CPU HTTP [%] | RSS WS [MB] | RSS HTTP [MB] |
 | -------------: | ---------------: | -----------------: | -------------: | -------------: | ---------------: | ----------------: | ------------------: | --------------: | ----------------: | ---------: | -----------: | ----------: | ------------: |
-|              0 |         **1.00** |               1.00 |             0% |        **2.0** |            158.0 |               486 |             **472** |            35.1 |          **34.1** |        3.2 |      **1.2** |   **193.7** |         194.0 |
-|             50 |         **1.00** |               0.98 |             1% |        **2.6** |            158.5 |           **476** |                 491 |            36.4 |          **33.3** |       54.3 |     **49.9** |       224.6 |     **222.2** |
+|              0 |             1.30 |           **1.41** |            -8% |            3.6 |          **2.9** |               417 |             **312** |        **48.9** |              51.2 |    **1.8** |          2.1 |   **209.0** |         209.1 |
 
 ### Wnioski — porównanie WS vs HTTP wg liczby klientów (Rate/cli)
 
@@ -621,17 +437,13 @@ Legenda: Pogrubienia oznaczają korzystniejszą wartość w danej kolumnie (niż
 
 | Klienci | Rate/cli WS [/s] | Rate/cli HTTP [/s] | Δ Rate/cli [%] | Jitter WS [ms] | Jitter HTTP [ms] | Staleness WS [ms] | Staleness HTTP [ms] | ELU p99 WS [ms] | ELU p99 HTTP [ms] | CPU WS [%] | CPU HTTP [%] | RSS WS [MB] | RSS HTTP [MB] |
 | ------: | ---------------: | -----------------: | -------------: | -------------: | ---------------: | ----------------: | ------------------: | --------------: | ----------------: | ---------: | -----------: | ----------: | ------------: |
-|       1 |         **1.01** |               1.00 |             2% |        **3.9** |              5.8 |               498 |             **458** |            34.4 |          **33.3** |   **25.5** |         25.5 |       207.8 |     **203.4** |
-|      10 |             0.99 |           **0.99** |            -0% |        **1.6** |            293.4 |               511 |             **485** |            34.3 |          **34.2** |       26.3 |     **26.1** |   **203.7** |         204.8 |
-|      25 |         **1.00** |               0.99 |             1% |        **1.3** |            193.3 |           **467** |                 484 |            36.0 |          **34.0** |       29.0 |     **25.8** |       208.5 |     **206.7** |
-|      50 |         **1.00** |               0.99 |             1% |        **2.4** |            140.4 |           **448** |                 500 |            38.3 |          **33.1** |       34.2 |     **24.8** |   **216.7** |         217.7 |
 
 ### Wnioski — krótkie podsumowanie (WS vs HTTP)
 
-- Średnio (ten run): Rate/cli — WS 1.00 /s vs HTTP 0.99 /s
-- Średnio: Jitter — WS 2.3 ms vs HTTP 158.2 ms (niżej = stabilniej)
-- Średnio: Staleness — WS 481 ms vs HTTP 482 ms (niżej = świeżej)
-- Średnio: CPU — WS 28.7% vs HTTP 25.6% (niżej = lżej)
+- Średnio (ten run): Rate/cli — WS — /s vs HTTP 1.41 /s
+- Średnio: Jitter — WS — ms vs HTTP 2.9 ms (niżej = stabilniej)
+- Średnio: Staleness — WS — ms vs HTTP 312 ms (niżej = świeżej)
+- Średnio: CPU — WS —% vs HTTP 2.1% (niżej = lżej)
 
 <!-- AUTO-RESULTS:END -->
 

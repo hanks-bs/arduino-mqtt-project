@@ -145,6 +145,8 @@ function summarizeSession(s: SessionRecord) {
       dt: 0,
       rateTime: 0,
       bytesTime: 0,
+      ingestLat: 0,
+      emitLat: 0,
     } as {
       cpu: number;
       rss: number;
@@ -155,8 +157,21 @@ function summarizeSession(s: SessionRecord) {
       dt: number;
       rateTime: number;
       bytesTime: number;
+      ingestLat: number;
+      emitLat: number;
     },
   );
+  // Collect per-sample latencies for CI
+  const ingestSeries: number[] = [];
+  const emitSeries: number[] = [];
+  for (const m of samples) {
+    if (m.sourceTsMs && m.ingestTsMs && m.ingestTsMs >= m.sourceTsMs) {
+      ingestSeries.push(m.ingestTsMs - m.sourceTsMs);
+    }
+    if (m.sourceTsMs && m.emitTsMs && m.emitTsMs >= m.sourceTsMs) {
+      emitSeries.push(m.emitTsMs - m.sourceTsMs);
+    }
+  }
   const dtSum = Math.max(
     0.0001,
     sum.dt || (n * (samples[0]?.tickMs || 0)) / 1000,
@@ -178,7 +193,7 @@ function summarizeSession(s: SessionRecord) {
   const jitterSeries = samples.map(m =>
     s.config.mode === 'polling' ? m.httpJitterMs : m.wsJitterMs,
   );
-  const stalenessSeries = samples.map(m => m.dataFreshnessMs);
+  const freshSeries = samples.map(m => m.dataFreshnessMs);
   const mean = (a: number[]) =>
     a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
   const variance = (a: number[], mu: number) =>
@@ -189,20 +204,24 @@ function summarizeSession(s: SessionRecord) {
   const rateStd = stddev(rateSeries);
   const bytesStd = stddev(bytesSeries);
   const jitterStd = stddev(jitterSeries);
-  const stalenessStd = stddev(stalenessSeries);
+  const freshStd = stddev(freshSeries);
+  const ingestStd = stddev(ingestSeries);
+  const emitStd = stddev(emitSeries);
   // Standard CI (z odchylenia próbki)
   const ci95RateStd =
     1.96 * (rateSeries.length ? rateStd / Math.sqrt(rateSeries.length) : 0);
   const ci95BytesStd =
     1.96 * (bytesSeries.length ? bytesStd / Math.sqrt(bytesSeries.length) : 0);
-  const ci95JitterStd =
+  const ci95Jitter =
     1.96 *
     (jitterSeries.length ? jitterStd / Math.sqrt(jitterSeries.length) : 0);
-  const ci95StalenessStd =
+  const ci95Fresh =
+    1.96 * (freshSeries.length ? freshStd / Math.sqrt(freshSeries.length) : 0);
+  const ci95Ingest =
     1.96 *
-    (stalenessSeries.length
-      ? stalenessStd / Math.sqrt(stalenessSeries.length)
-      : 0);
+    (ingestSeries.length ? ingestStd / Math.sqrt(ingestSeries.length) : 0);
+  const ci95Emit =
+    1.96 * (emitSeries.length ? emitStd / Math.sqrt(emitSeries.length) : 0);
   // Fallback Poissona dla rzadkich zdarzeń (stabilizuje CI przy bardzo małych średnich)
   const eventsApprox = Math.max(0, Math.round(totalMsgsApprox));
   const ci95RatePois =
@@ -211,8 +230,6 @@ function summarizeSession(s: SessionRecord) {
   const usePoisson = avgRate < 0.5 || eventsApprox < 30;
   const ci95Rate = usePoisson ? ci95RatePois : ci95RateStd;
   const ci95Bytes = usePoisson ? ci95BytesPois : ci95BytesStd;
-  const ci95Jitter = ci95JitterStd; // jitter nie jest procesem Poissona
-  const ci95Staleness = ci95StalenessStd;
   const median = (a: number[]) => {
     if (!a.length) return 0;
     const sorted = a.slice().sort((x, y) => x - y);
@@ -220,15 +237,6 @@ function summarizeSession(s: SessionRecord) {
     return sorted.length % 2
       ? sorted[mid]
       : (sorted[mid - 1] + sorted[mid]) / 2;
-  };
-  const percentile = (a: number[], p: number) => {
-    if (!a.length) return 0;
-    const sorted = a.slice().sort((x, y) => x - y);
-    const idx = Math.min(
-      sorted.length - 1,
-      Math.max(0, Math.floor((p / 100) * (sorted.length - 1))),
-    );
-    return sorted[idx];
   };
   const trimmedMean = (a: number[], frac: number) => {
     if (!a.length) return 0;
@@ -238,6 +246,15 @@ function summarizeSession(s: SessionRecord) {
     return trimmed.length
       ? trimmed.reduce((x, y) => x + y, 0) / trimmed.length
       : mean(sorted);
+  };
+  const percentile = (a: number[], p: number) => {
+    if (!a.length) return 0;
+    const sorted = a.slice().sort((x, y) => x - y);
+    const idx = Math.min(
+      sorted.length - 1,
+      Math.max(0, Math.round(p * (sorted.length - 1))),
+    );
+    return sorted[idx];
   };
   let rateMedian = median(rateSeries);
   let bytesMedian = median(bytesSeries);
@@ -284,6 +301,16 @@ function summarizeSession(s: SessionRecord) {
   if (bytesMedian === 0 && avgBytesRate > 0) bytesMedian = avgBytesRate;
   const rateTrimmed = trimmedMean(rateSeries, 0.1);
   const bytesTrimmed = trimmedMean(bytesSeries, 0.1);
+  const freshMedian = median(freshSeries);
+  const freshP95 = percentile(freshSeries, 0.95);
+  const ingestAvg = ingestSeries.length
+    ? ingestSeries.reduce((a, b) => a + b, 0) / ingestSeries.length
+    : 0;
+  const emitAvg = emitSeries.length
+    ? emitSeries.reduce((a, b) => a + b, 0) / emitSeries.length
+    : 0;
+  const ingestMedian = median(ingestSeries);
+  const emitMedian = median(emitSeries);
   const relCiRate = avgRate !== 0 ? ci95Rate / avgRate : 0;
   const relCiBytes = avgBytesRate !== 0 ? ci95Bytes / avgBytesRate : 0;
   // Per-client normalization
@@ -315,57 +342,6 @@ function summarizeSession(s: SessionRecord) {
         ? avgBytesRate / clients
         : undefined
       : avgRate * (avgPayload || 0); // WS: per-client = Rate × Payload (klient dostaje pełny ładunek)
-  const bytesRatePerClientServer =
-    clients > 0 ? avgBytesRate / clients : undefined; // perspektywa serwera dla obu metod
-
-  // Szacunek egressu (łączny koszt sieci z perspektywy serwera)
-  const egressBytesRateEst =
-    s.config.mode === 'ws'
-      ? avgRate * (avgPayload || 0) * Math.max(0, clientsWs)
-      : avgBytesRate;
-
-  // E2E latencje (ms) wyliczone z telemetrii znaczników czasu
-  const srcToIngest = samples
-    .map(m =>
-      Number.isFinite(m.sourceTsMs as any) &&
-      Number.isFinite(m.ingestTsMs as any)
-        ? (m.ingestTsMs as number) - (m.sourceTsMs as number)
-        : NaN,
-    )
-    .filter(v => Number.isFinite(v) && (v as number) >= 0) as number[];
-  const ingestToEmit = samples
-    .map(m =>
-      Number.isFinite(m.ingestTsMs as any) && Number.isFinite(m.emitTsMs as any)
-        ? (m.emitTsMs as number) - (m.ingestTsMs as number)
-        : NaN,
-    )
-    .filter(v => Number.isFinite(v) && (v as number) >= 0) as number[];
-  const srcToEmit = samples
-    .map(m =>
-      Number.isFinite(m.sourceTsMs as any) && Number.isFinite(m.emitTsMs as any)
-        ? (m.emitTsMs as number) - (m.sourceTsMs as number)
-        : NaN,
-    )
-    .filter(v => Number.isFinite(v) && (v as number) >= 0) as number[];
-  const avgSrcToIngestMs = mean(srcToIngest);
-  const avgIngestToEmitMs = mean(ingestToEmit);
-  const avgSrcToEmitMs = mean(srcToEmit);
-  const p95SrcToIngestMs = percentile(srcToIngest, 95);
-  const p95IngestToEmitMs = percentile(ingestToEmit, 95);
-  const p95SrcToEmitMs = percentile(srcToEmit, 95);
-  const ci95SrcToIngestMs =
-    1.96 *
-    (srcToIngest.length
-      ? stddev(srcToIngest) / Math.sqrt(srcToIngest.length)
-      : 0);
-  const ci95IngestToEmitMs =
-    1.96 *
-    (ingestToEmit.length
-      ? stddev(ingestToEmit) / Math.sqrt(ingestToEmit.length)
-      : 0);
-  const ci95SrcToEmitMs =
-    1.96 *
-    (srcToEmit.length ? stddev(srcToEmit) / Math.sqrt(srcToEmit.length) : 0);
   return {
     id: s.id,
     label: s.config.label,
@@ -402,24 +378,22 @@ function summarizeSession(s: SessionRecord) {
     bytesPerUnit,
     ratePerClient,
     bytesRatePerClient,
-    bytesRatePerClientServer,
-    egressBytesRateEst,
     avgJitterMs: sum.jitter / n,
+    avgFreshnessMs: sum.fresh / n,
     jitterStd,
     ci95Jitter,
-    avgFreshnessMs: sum.fresh / n,
-    avgStalenessMs: sum.fresh / n,
-    stalenessStd,
-    ci95Staleness,
-    avgSrcToIngestMs,
-    p95SrcToIngestMs,
-    ci95SrcToIngestMs,
-    avgIngestToEmitMs,
-    p95IngestToEmitMs,
-    ci95IngestToEmitMs,
-    avgSrcToEmitMs,
-    p95SrcToEmitMs,
-    ci95SrcToEmitMs,
+    freshStd,
+    ci95Fresh,
+    freshMedian,
+    freshP95,
+    ingestAvgMs: ingestAvg,
+    ingestMedianMs: ingestMedian,
+    ci95IngestMs: ci95Ingest,
+    ingestStdMs: ingestStd,
+    emitAvgMs: emitAvg,
+    emitMedianMs: emitMedian,
+    ci95EmitMs: ci95Emit,
+    emitStdMs: emitStd,
   };
 }
 
@@ -1026,7 +1000,6 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
         payload: 'B',
         jitter: 'ms',
         staleness: 'ms',
-        latency: 'ms',
         tick: 'ms',
         elDelayP99: 'ms',
         cpu: '%',
@@ -1152,36 +1125,39 @@ if (require.main === module) {
 
   const cliOpts: MeasureOpts = {
     modes: modesArg
-      ? (modesArg.split(',').map(s => s.trim()) as Array<'ws' | 'polling'>)
+      ? (modesArg
+          .split(/[ ,]+/)
+          .map(s => s.trim())
+          .filter(Boolean) as Array<'ws' | 'polling'>)
       : undefined,
     hzSet: hzArg
       ? hzArg
-          .split(',')
+          .split(/[ ,]+/)
           .map(s => Number(s.trim()))
           .filter(n => Number.isFinite(n) && n > 0)
       : undefined,
     loadSet: loadArg
       ? loadArg
-          .split(',')
+          .split(/[ ,]+/)
           .map(s => Number(s.trim()))
           .filter(n => Number.isFinite(n))
       : undefined,
     durationSec: durArg ? Number(durArg) : undefined,
     tickMs: tickArg ? Number(tickArg) : undefined,
     clientsHttp:
-      cHttpArg && !cHttpArg.includes(',') ? Number(cHttpArg) : undefined,
-    clientsWs: cWsArg && !cWsArg.includes(',') ? Number(cWsArg) : undefined,
+      cHttpArg && !/[ ,]/.test(cHttpArg) ? Number(cHttpArg) : undefined,
+    clientsWs: cWsArg && !/[ ,]/.test(cWsArg) ? Number(cWsArg) : undefined,
     clientsHttpSet:
-      cHttpArg && cHttpArg.includes(',')
+      cHttpArg && /[ ,]/.test(cHttpArg)
         ? cHttpArg
-            .split(',')
+            .split(/[ ,]+/)
             .map(s => Number(s.trim()))
             .filter(n => Number.isFinite(n))
         : undefined,
     clientsWsSet:
-      cWsArg && cWsArg.includes(',')
+      cWsArg && /[ ,]/.test(cWsArg)
         ? cWsArg
-            .split(',')
+            .split(/[ ,]+/)
             .map(s => Number(s.trim()))
             .filter(n => Number.isFinite(n))
         : undefined,
@@ -1360,8 +1336,7 @@ ${rows}`;
             : '';
         const f = (n: any, d = 2) =>
           Number.isFinite(Number(n)) ? Number(n).toFixed(d) : '—';
-        const stale = (s as any).avgStalenessMs ?? (s as any).avgFreshnessMs;
-        return `| ${s.label}${rep} | ${s.mode} | ${f(rateCli, 2)} | ${f(bytesCli, 0)} | ${f(s.avgJitterMs, 1)} | ${f(stale, 0)} | ${f(s.avgCpu, 1)} | ${f(s.avgRss, 1)} |`;
+        return `| ${s.label}${rep} | ${s.mode} | ${f(rateCli, 2)} | ${f(bytesCli, 0)} | ${f(s.avgJitterMs, 1)} | ${f(s.avgFreshnessMs, 0)} | ${f(s.avgCpu, 1)} | ${f(s.avgRss, 1)} |`;
       })
       .join('\n');
     return `${header}\n${lines}`;
@@ -1382,8 +1357,7 @@ ${rows}`;
       httpAvgBytesPerReq/wsAvgBytesPerMsg — średni ładunek [B]
       httpJitterMs/wsJitterMs — zmienność odstępów (stddev) [ms]
       tickMs — realny odstęp między próbkami mierzony monotonicznie [ms]
-  dataFreshnessMs — Staleness (wiek danych): czas od ostatniego odczytu [ms]
-  sourceTsMs/ingestTsMs/emitTsMs — znaczniki czasowe do wyliczeń E2E (źródło→ingest→emit)
+      dataFreshnessMs — Staleness (wiek danych): czas od ostatniego odczytu [ms]
   `;
 
   const dashboardMap = `
@@ -1500,7 +1474,7 @@ Uwaga (WS — Bytes/cli): W pełnej tabeli Bytes/cli dla WS liczone jest jako em
   - Jitter/Staleness: różnica ≥ 20% lub ≥ 50 ms przy wartościach ~setek ms.
   - CPU: < 3–5 pp często szum; > 5–7 pp — potencjalnie istotne.
   - RSS: < 10 MB zwykle pomijalne, chyba że stabilne w wielu scenariuszach.
-- Spójność: uznaj różnicę za „realną”, gdy powtarza się w obu repach i w agregatach (wg obciążenia/klientów).
+- Spójność: uznaj różnicę za „realną”, gdy powtarza się w obu repach i w zestawieniach (wg obciążenia/klientów).
 - Semantyka sieci: WS egress ≈ Rate × Payload × N; HTTP Bytes/s to suma po klientach.
 
 ## Jak czytać wyniki i powiązanie z dashboardem
@@ -1519,35 +1493,32 @@ ${params}
 
 Niepewność średnich (95% CI) dla kluczowych wielkości na sesję. Tick próbkowania ≈ ${runConfig.monitorTickMs} ms (sterowany przez \`MONITOR_TICK_MS\`).
 
-| Label | n (used/total) | Rate [/s] | CI95 Rate | σ(rate) | Bytes/s | CI95 Bytes | σ(bytes) | Jitter [ms] | CI95 Jitter | Staleness [ms] | CI95 Staleness |
-|---|:--:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-${evaluated
-  .map(s => {
-    const nUsed = (s as any).nUsed ?? s.count;
-    const nTotal = (s as any).nTotal ?? s.count;
-    const ciRate = (s as any).ci95Rate ?? 0;
-    const ciBytes = (s as any).ci95Bytes ?? 0;
-    const rateStd = (s as any).rateStd ?? 0;
-    const bytesStd = (s as any).bytesStd ?? 0;
-    const ciJ = (s as any).ci95Jitter ?? 0;
-    const ciSt = (s as any).ci95Staleness ?? 0;
-    const avgJ = (s as any).avgJitterMs ?? 0;
-    const avgSt = (s as any).avgStalenessMs ?? (s as any).avgFreshnessMs ?? 0;
-    return `| ${s.label} | ${nUsed}/${nTotal} | ${s.avgRate.toFixed(2)} | ± ${ciRate.toFixed(2)} | ${rateStd.toFixed(2)} | ${s.avgBytesRate.toFixed(0)} | ± ${ciBytes.toFixed(0)} | ${bytesStd.toFixed(0)} | ${avgJ.toFixed(1)} | ± ${ciJ.toFixed(1)} | ${avgSt.toFixed(0)} | ± ${ciSt.toFixed(0)} |`;
-  })
-  .join('\n')}
-
-## E2E latency (avg / p95) [ms]
-
-| Label | Src→Ingest avg | Src→Ingest p95 | Ingest→Emit avg | Ingest→Emit p95 | Src→Emit avg | Src→Emit p95 |
-|---|---:|---:|---:|---:|---:|---:|
-${evaluated
-  .map(s => {
-    const f = (v: any, d = 1) =>
-      Number.isFinite(Number(v)) ? Number(v).toFixed(d) : '—';
-    return `| ${s.label} | ${f((s as any).avgSrcToIngestMs)} | ${f((s as any).p95SrcToIngestMs)} | ${f((s as any).avgIngestToEmitMs)} | ${f((s as any).p95IngestToEmitMs)} | ${f((s as any).avgSrcToEmitMs)} | ${f((s as any).p95SrcToEmitMs)} |`;
-  })
-  .join('\n')}
+| Label | n (used/total) | Rate [/s] | CI95 Rate | σ(rate) | Bytes/s | CI95 Bytes | σ(bytes) | Jitter [ms] | CI95 Jitter | Stal [ms] | CI95 Stal | Median Stal | p95 Stal | Ingest E2E [ms] | CI95 Ingest | Emit E2E [ms] | CI95 Emit |
+|---|:--:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| ${evaluated
+    .map(s => {
+      const nUsed = (s as any).nUsed ?? s.count;
+      const nTotal = (s as any).nTotal ?? s.count;
+      const ciRate = (s as any).ci95Rate ?? 0;
+      const ciBytes = (s as any).ci95Bytes ?? 0;
+      const rateStd = (s as any).rateStd ?? 0;
+      const bytesStd = (s as any).bytesStd ?? 0;
+      const ciJitter = (s as any).ci95Jitter ?? 0;
+      const jitterStd = (s as any).jitterStd ?? 0;
+      const ciFresh = (s as any).ci95Fresh ?? 0;
+      const freshStd = (s as any).freshStd ?? 0;
+      const freshMedian = (s as any).freshMedian ?? 0;
+      const freshP95 = (s as any).freshP95 ?? 0;
+      const ingestAvg = (s as any).ingestAvgMs ?? NaN;
+      const ciIngest = (s as any).ci95IngestMs ?? 0;
+      const emitAvg = (s as any).emitAvgMs ?? NaN;
+      const ciEmit = (s as any).ci95EmitMs ?? 0;
+      const f2 = (x: number) => Number(x).toFixed(2);
+      const f0 = (x: number) => Number(x).toFixed(0);
+      const f1 = (x: number) => Number(x).toFixed(1);
+      return `| ${s.label} | ${nUsed}/${nTotal} | ${f2(s.avgRate)} | ± ${f2(ciRate)} | ${f2(rateStd)} | ${f0(s.avgBytesRate)} | ± ${f0(ciBytes)} | ${f0(bytesStd)} | ${f1((s as any).avgJitterMs)} | ± ${f1(ciJitter)} | ${f0((s as any).avgFreshnessMs)} | ± ${f0(ciFresh)} | ${f0(freshMedian)} | ${f0(freshP95)} | ${Number.isFinite(ingestAvg) ? f0(ingestAvg) : '—'} | ± ${f0(ciIngest)} | ${Number.isFinite(emitAvg) ? f0(emitAvg) : '—'} | ± ${f0(ciEmit)} |`;
+    })
+    .join('\n')}
 
 ## Porównanie wg obciążenia (przegląd)
 

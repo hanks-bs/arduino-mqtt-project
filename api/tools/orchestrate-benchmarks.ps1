@@ -181,6 +181,12 @@ try {
               $env:MEASURE_PAIR = "1"
               & npm.cmd run measure --silent -- --clientsHttp $cHttp --clientsWs $cWs
 
+              # Walidacja wyników (generuje validation.txt w folderze runu)
+              & npm.cmd run validate:auto --silent
+
+              # Aktualizacja dokumentu badawczego po walidacji (zaczyta validation.txt)
+              & npm.cmd run docs:research:update --silent
+
               # Przywróć ENV
               foreach ($k in $prevEnv.Keys) {
                 if ($null -eq $prevEnv[$k]) {
@@ -191,8 +197,6 @@ try {
               }
               # Zachowaj znacznik katalogu w indexie (sticky)
               if ($LASTEXITCODE -ne 0) { Write-Error "Runner zwrócił kod $LASTEXITCODE" }
-
-              & npm.cmd run docs:research:update --silent
 
               $last = Get-Item $stickyOut
               if ($null -eq $last) { Write-Warning 'Brak katalogu wyników'; continue }
@@ -306,6 +310,12 @@ try {
 
               & npm.cmd run measure --silent -- --clientsHttp $cHttp --clientsWs $cWs
 
+              # Walidacja wyników (validation.txt)
+              & npm.cmd run validate:auto --silent
+
+              # Aktualizacja dokumentu badawczego po walidacji
+              & npm.cmd run docs:research:update --silent
+
               # Przywróć ENV
               foreach ($k in $prevEnv.Keys) {
                 if ($null -eq $prevEnv[$k]) {
@@ -315,9 +325,6 @@ try {
                 }
               }
               if ($LASTEXITCODE -ne 0) { Write-Error "Runner zwrócił kod $LASTEXITCODE" }
-
-              # Zaktualizuj dokument badawczy po każdym przebiegu
-              & npm.cmd run docs:research:update --silent
 
               # Pobierz najnowszy katalog z wynikami
               $last = Get-Item $stickyOut

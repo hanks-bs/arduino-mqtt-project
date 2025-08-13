@@ -12,6 +12,12 @@ const globalRoutes = Router();
 /** Wrapper route that records response bytes for the Arduino endpoint */
 globalRoutes.get(
   '/api/arduino-data',
+  (req, _res, next) => {
+    try {
+      ResourceMonitor.noteIngest();
+    } catch {}
+    next();
+  },
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       // call controller to get data string

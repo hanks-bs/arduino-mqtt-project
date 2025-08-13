@@ -4,6 +4,8 @@ Języki / Languages: [Polski (PL)](./README.pl.md) | [English (EN)](./README.en.
 
 Monorepo zawiera trzy główne elementy:
 
+Skróty: [Aspekt badawczy (PL)](./docs/ASPEKT_BADAWCZY.md) • [Glosariusz (PL)](./docs/GLOSARIUSZ.md)
+
 | Folder           | Rola                                                                           |
 | ---------------- | ------------------------------------------------------------------------------ |
 | `api/`           | Backend (Express + MQTT + WebSocket + monitor zasobów)                         |
@@ -156,8 +158,7 @@ Pomiarów dokonujemy po stronie API. Zaimplementowany jest kompletny „measurem
 - Uruchomienie pomiaru (zapisuje pliki wynikowe do `api/benchmarks/<timestamp>/`):
   - z katalogu `api/`: `yarn measure`
 - Pliki wynikowe jednego uruchomienia:
-  - `sessions.csv` – spłaszczone próbki z sesji (WS i HTTP)
-  - `summary.json` – agregaty (średnie, ELU p99, jitter, staleness)
+  - `sessions.csv` – spłaszczone próbki z sesji (WS i HTTP) - `summary.json` – statystyki zbiorcze (średnie, ELU p99, jitter, staleness)
   - `README.md` – skrót wyników z mapowaniem do dashboardu
 - Aktualizacja sekcji „Wyniki ostatnich pomiarów (auto)” w `docs/ASPEKT_BADAWCZY.md`:
   - z katalogu `api/`: `yarn docs:research:update`

@@ -1,36 +1,44 @@
-# Plan badań i hipotezy
+# Plan badań (skrót)
 
-Celem badań jest porównanie transportu danych telemetrycznych do klienta: WebSocket (push) vs HTTP polling (pull).
+Odnośniki: [Hipotezy](./RESEARCH_HYPOTHESES.md) • [Aspekt badawczy](./ASPEKT_BADAWCZY.md) • [Glosariusz](./GLOSARIUSZ.md)
 
-## Hipotezy
+Cel: porównać dwa wzorce transportu danych telemetrycznych do klienta: WebSocket (push, broadcast) vs HTTP polling (pull, cykliczne żądania) pod kątem świeżości danych, stabilności interwałów, kosztu sieci i zużycia zasobów procesu.
 
-- H1: WS ma niższy staleness [ms] niż HTTP przy tych samych Hz (0.5–2 Hz).
-- H2: Bytes/s ≈ Rate × Payload dla obu metod (stały ładunek).
-- H3: Jitter [ms] jest niższy dla WS (driver) niż HTTP (timery).
-- H4: CPU i ELU p99 pozostają akceptowalne do 2 Hz; rosną wraz z Hz i N klientów.
-- H5: Skalowanie po liczbie klientów jest korzystniejsze dla WS (broadcast) niż HTTP (koszt per request).
+## Zakres i hipotezy
 
-## Metryki i kryteria
+Hipotezy szczegółowe oraz uzasadnienia znajdują się w `RESEARCH_HYPOTHESES.md`. Ten dokument utrzymuje tylko minimalny plan wykonawczy.
 
-- Rate [/s] (wyżej lepiej), Bytes/s, ~Payload [B].
-- Jitter [ms], Staleness [ms] (niżej lepiej).
-- ELU p99 [ms], CPU [%], RSS [MB] (niżej lepiej).
-- Wiarygodność: n(used) ≥ 10; CI95/średnia < 30% (praktyczne kryterium dla krótkich przebiegów).
+## Metryki główne
 
-## Scenariusze
+Rate [/s], Bytes/s, ~Payload [B], Jitter [ms], Wiek danych (Staleness) [ms], EL delay p99 [ms], CPU [%], RSS [MB], (opcjonalnie) E2E ingest/emit [ms], egress est. [B/s].
 
-- S1–S4: WS/HTTP × {1 klient, N klientów} (pokryte runnerem).
-- S5: ≥ 4 Hz (wymaga flag), S6: mix WS/HTTP (do rozważenia).
+Kryteria jakości (krótkie przebiegi): n(used) ≥ 10 oraz względny CI95 (Rate, Bytes/s) < 30% (gdy mniejsze – wyniki stabilne). Przy n<8 traktuj wyniki eksploracyjnie.
 
-## Procedura
+## Scenariusze bazowe
 
-- Uruchamiaj z katalogu `api`:
-  - Szybko: `npm run research:quick`
-  - Bezpiecznie: `npm run research:safe`
-  - Pełna macierz: `npm run research:full`
-- Wyniki: `api/benchmarks/<timestamp>/{sessions.csv, summary.json, README.md}`.
-- Auto-aktualizacja: sekcja AUTO-RESULTS w `docs/ASPEKT_BADAWCZY.md`.
+S1: WS – 1 klient; S2: WS – N>1 klientów; S3: HTTP – 1 klient; S4: HTTP – N>1; S5: wyższe Hz (2–5) dla oceny narzutu; S6: (planowane) mieszane WS + HTTP.
 
-## Prezentacja wyników
+## Procedura minimalna
 
-- W raporcie per run (README) i w dokumencie badawczym wskazujemy zwycięzców per kategoria (rate, jitter, staleness, CPU, RSS) oraz krótkie porównanie WS vs HTTP.
+1. W katalogu `api` uruchom jedną z komend:
+
+- Szybki sanity: `npm run research:quick`
+- Bezpieczny (źródło-limitowany): `npm run research:safe`
+- Solidny (pełniejszy CI): `npm run research:robust`
+- Pełna macierz: `npm run research:full`
+
+1. Po zakończeniu sprawdź: `api/benchmarks/<ts>/README.md`, `summary.json` oraz sekcję AUTO-RESULTS w `docs/ASPEKT_BADAWCZY.md`.
+
+1. Oceń walidację (validation.txt). Jeśli status WARN z powodu source‑limited, interpretuj Rate ostrożnie (sprawdź Staleness).
+
+## Interpretacja syntetyczna
+
+Porównuj per‑klienta: Rate/cli (wyżej), Jitter/Staleness (niżej), CPU/RSS (niżej). Koszt sieci: HTTP = Bytes/s; WS egress ≈ Rate × Payload × N. Gdy przedziały ufności się nakładają – różnica niejednoznaczna.
+
+## Artefakty i automatyzacja
+
+Każdy run tworzy folder czasowy w `api/benchmarks/`. Dokument badawczy aktualizuje blok AUTO-RESULTS; globalne zestawienie generuje `WYNIKI_ZBIORCZE.md`.
+
+## Glosariusz skrótów
+
+Jitter – zmienność interwałów; Staleness – wiek ostatnich danych; EL delay p99 – 99 percentyl opóźnienia pętli zdarzeń; E2E ingest/emit – czas od źródła do API oraz od źródła do wysłania do klienta.

@@ -295,7 +295,10 @@ class ResourceMonitorService {
     this.totalHttpRequests += 1;
     this.totalHttpBytes += bytes;
     const now = Date.now();
-    this.lastIngestAtMs = now;
+    // Ingest znaczony już wcześniej w middleware noteIngest(), ale jeśli brak to fallback teraz
+    if (!this.lastIngestAtMs || now - this.lastIngestAtMs > 5) {
+      this.lastIngestAtMs = now;
+    }
     if (this.lastHttpResponseAt) {
       const delta = now - this.lastHttpResponseAt;
       if (delta >= 0) this.pushInterval(this.httpIntervals, delta);
@@ -325,6 +328,12 @@ class ResourceMonitorService {
   /** Enables/disables real‑time WS emissions (useful for test/benchmark isolation). */
   setLiveEmitEnabled(enabled: boolean) {
     this.liveEmitEnabled = !!enabled;
+  }
+
+  /** Explicitly note ingest moment (np. tuż po przyjęciu MQTT / HTTP request before processing). */
+  noteIngest(atMs?: number) {
+    const t = atMs && Number.isFinite(atMs) ? atMs : Date.now();
+    this.lastIngestAtMs = t;
   }
 
   /** Returns whether real‑time WS emissions are currently enabled. */
@@ -755,10 +764,20 @@ class ResourceMonitorService {
       1,
       Math.floor(payloadBytes || this.lastArduinoPayloadBytes),
     );
+    const e2eIngestDelayMs = 1; // symulowany dystans source->ingest
+    const e2eEmitDelayMs = 2; // symulowany dystans ingest->emit/response
     const doOnce = () => {
       try {
-        this.onHttpResponse(bytes);
-        this.setLastArduinoTimestamp(new Date().toISOString());
+        const base = Date.now();
+        // 1. Źródło (Arduino) – znacznik czasu źródła
+        this.setLastArduinoTimestamp(new Date(base).toISOString());
+        // 2. Ingest (po krótkim opóźnieniu)
+        setTimeout(
+          () => this.noteIngest(base + e2eIngestDelayMs),
+          e2eIngestDelayMs,
+        );
+        // 3. HTTP odpowiedź (emit) po dodatkowym opóźnieniu
+        setTimeout(() => this.onHttpResponse(bytes), e2eEmitDelayMs);
       } catch {}
     };
     for (let i = 0; i < Math.max(1, count); i++) {
@@ -787,14 +806,24 @@ class ResourceMonitorService {
       1,
       Math.floor(assumedBytes || this.lastArduinoPayloadBytes),
     );
+    const e2eIngestDelayMs = 1;
+    const e2eEmitDelayMs = 2;
     const doOnce = () => {
       try {
-        // Emit synthetic WS payload to exercise Socket.IO and count bytes
-        const payload = 'x'.repeat(payloadBytes);
-        if (this.liveEmitEnabled) this.io?.emit('arduinoData', payload);
-        // Count WS emission with approximate payload size; keep freshness up-to-date
-        this.onWsEmit(payloadBytes);
-        this.setLastArduinoTimestamp(new Date().toISOString());
+        const base = Date.now();
+        // 1. Źródło
+        this.setLastArduinoTimestamp(new Date(base).toISOString());
+        // 2. Ingest
+        setTimeout(
+          () => this.noteIngest(base + e2eIngestDelayMs),
+          e2eIngestDelayMs,
+        );
+        // 3. Emit (WS)
+        setTimeout(() => {
+          const payload = 'x'.repeat(payloadBytes);
+          if (this.liveEmitEnabled) this.io?.emit('arduinoData', payload);
+          this.onWsEmit(payloadBytes);
+        }, e2eEmitDelayMs);
       } catch {}
     };
     doOnce();

@@ -1,5 +1,7 @@
 # Architektura i Zasada Działania Systemu
 
+Odnośniki skrócone: [Aspekt badawczy](./ASPEKT_BADAWCZY.md) • [Plan badań](./RESEARCH_PLAN.md) • [Hipotezy](./RESEARCH_HYPOTHESES.md) • [Glosariusz](./GLOSARIUSZ.md)
+
 ## 1. Cel systemu
 
 System realizuje akwizycję danych sensorycznych z Arduino, ich ujednolicenie w formacie JSON, dystrybucję przez MQTT oraz prezentację i analizę w aplikacji web (Next.js) z natychmiastową aktualizacją (WebSocket). Dodatkowo zapewnia moduł eksperymentalny do porównania trybów transmisji (push vs polling) oraz monitorowanie zużycia zasobów procesu backend.
@@ -305,14 +307,14 @@ Z każdej sesji: średnia, mediana, P95 dla: `cpu`, `rssMB`, `elu`, `elDelayP99M
 
 ### 9.1 Wskaźniki pochodne
 
-| Wskaźnik           | Wzór                                 | Interpretacja                                            |
-| ------------------ | ------------------------------------ | -------------------------------------------------------- |
-| CPU_per_msg_WS     | `cpu / max(wsMsgRate,1)`             | Średnie koszty CPU (%) na jedną wiadomość push           |
-| CPU_per_req_HTTP   | `cpu / max(httpReqRate,1)`           | Średnie koszty CPU na jedno żądanie (polling)            |
-| Bytes_per_msg_WS   | `wsBytesRate / max(wsMsgRate,1)`     | Średnia wielkość payloadu WS + nagłówki (przybliżenie)   |
-| Bytes_per_req_HTTP | `httpBytesRate / max(httpReqRate,1)` | Średni rozmiar odpowiedzi HTTP                           |
-| Overhead_ratio_CPU | `CPU_per_req_HTTP / CPU_per_msg_WS`  | Ile razy polling droższy w CPU od push                   |
-| EL_Delay_Stress    | `elDelayP99Ms / elDelayP50Ms`        | Wskaźnik przeciążenia pętli (wyższe = gorsza kulturacja) |
+| Wskaźnik           | Wzór                                             | Interpretacja                                            |
+| ------------------ | ------------------------------------------------ | -------------------------------------------------------- |
+| CPU_per_msg_WS     | $\dfrac{cpu}{\max(wsMsgRate,1)}$                 | Średnie koszty CPU (%) na jedną wiadomość push           |
+| CPU_per_req_HTTP   | $\dfrac{cpu}{\max(httpReqRate,1)}$               | Średnie koszty CPU na jedno żądanie (polling)            |
+| Bytes_per_msg_WS   | $\dfrac{wsBytesRate}{\max(wsMsgRate,1)}$         | Średnia wielkość payloadu WS + nagłówki (przybliżenie)   |
+| Bytes_per_req_HTTP | $\dfrac{httpBytesRate}{\max(httpReqRate,1)}$     | Średni rozmiar odpowiedzi HTTP                           |
+| Overhead_ratio_CPU | $\dfrac{CPU\_per\_req\_HTTP}{CPU\_per\_msg\_WS}$ | Ile razy polling droższy w CPU od push                   |
+| EL_Delay_Stress    | $\dfrac{elDelayP99Ms}{elDelayP50Ms}$             | Wskaźnik przeciążenia pętli (wyższe = gorsza kulturacja) |
 
 ### 9.2 Kryteria oceny
 
@@ -337,6 +339,17 @@ Uwagi: Pozornie niższy koszt jednostkowy przy bardzo częstym pollingu wynika z
 - Polling tylko dla środowisk z ograniczeniami (firewall / brak WS) lub do prostych jednorazowych odczytów.
 - Przy wzroście `elDelayP99Ms` > 60 ms rozważyć horyzontalne skalowanie lub obniżenie częstotliwości odpytań.
 
+### 9.5 Uzupełnienie teoretyczne (dlaczego te wskaźniki?)
+
+- Rate i Bytes/s: podstawowe miary przepustowości; relacja $Bytes/s \approx Rate \times Payload$ stanowi test spójności (duże odchylenia mogą wskazywać na nadmiarowe nagłówki lub straty/próbkowanie).
+- Jitter: odzwierciedla deterministyczność harmonogramu – wysoki jitter degraduje UX przy wizualizacjach czasu rzeczywistego (nieregularny napływ punktów).
+- Staleness: kluczowy dla „świeżości” systemów monitorujących; push redukuje dolną granicę do latencji transportu, podczas gdy pull ma dolną granicę ≈ okres odpytywania.
+- EL delay p99 / ELU: miary presji na event loop; p99 akcentuje tail latency związaną z GC i kumulacją zadań.
+- CPU_per_unit i Overhead_ratio_CPU: normalizują koszty, pozwalając oddzielić „więcej ruchu” od „droższy ruch”.
+- Egress est.: umożliwia ekstrapolację kosztów sieci przy skalowaniu liczby klientów (szczególnie istotne przy broadcast ws).
+
+Warto zauważyć, że stabilny jitter i niski staleness wpływają na mniejsze bufory buforowania po stronie klienta oraz zredukowane ryzyko nakładania się aktualizacji UI.
+
 ## 10. Skalowanie i wąskie gardła
 
 | Obszar              | Ograniczenie            | Sposób skalowania                               |
@@ -345,6 +358,34 @@ Uwagi: Pozornie niższy koszt jednostkowy przy bardzo częstym pollingu wynika z
 | API (1 proces)      | Pojedynczy event loop   | PM2 / cluster mode / horyzontalny load balancer |
 | Pamięć historii     | Trzymana w RAM          | Przeniesienie do Redis / bazy time-series       |
 | WebSocket broadcast | O(n) emisja             | Sharding namespaces / adapter Redis             |
+
+## 11. Instrumentacja E2E latencji (source → ingest → emit)
+
+Ta sekcja uzupełnia szczegóły opisane szerzej w `ASPEKT_BADAWCZY.md` (sekcja 2f) i dokumentuje ścieżkę czasową pojedynczej próbki danych.
+
+Znaczniki czasu:
+
+- `sourceTsMs` – chwila wytworzenia/przypisania stempla przez źródło (Arduino albo sterownik syntetyczny).
+- `ingestTsMs` – moment przyjęcia i wstępnego przetworzenia (po odebraniu z MQTT lub tuż przed zbudowaniem odpowiedzi HTTP).
+- `emitTsMs` – moment wysłania do klienta (emisja WS albo zakończenie odpowiedzi HTTP).
+
+Z nich wyprowadzamy metryki latencji end‑to‑end:
+
+- Ingest E2E [ms] = $ingestTsMs - sourceTsMs$
+- Emit E2E [ms] = $emitTsMs - sourceTsMs$
+
+Interpretacja:
+
+- Ingest E2E obejmuje transport + ewentualne kolejki do momentu wejścia do API.
+- Emit E2E to pełna ścieżka (źródło → API → klient) – dla WS zwykle minimalnie większa od Ingest (czas serializacji + push), dla HTTP obejmuje całe żądanie/odpowiedź.
+- W trybie syntetycznym dodawane są niewielkie kontrolowane opóźnienia (1–3 ms), aby uniknąć sztucznych zer i umożliwić estymację CI.
+
+Zastosowanie:
+
+- Używaj latencji E2E pomocniczo – główne rozróżnienia WS vs HTTP w tym projekcie lepiej eksponują Jitter i Staleness (wiek danych w strumieniu), zwłaszcza gdy źródło jest wolniejsze (~1 Hz).
+- Przy analizie realnego Arduino wskazane są dłuższe przebiegi (≥30 próbek) dla stabilnych przedziałów ufności.
+
+Powiązania z innymi dokumentami: [Aspekt badawczy – 2f](./ASPEKT_BADAWCZY.md#2f-instrumentacja-e2e-source--ingest--emit) • [Glosariusz](./GLOSARIUSZ.md)
 
 ## 12. Przykładowe skrypty obciążeniowe (symulacja klientów)
 

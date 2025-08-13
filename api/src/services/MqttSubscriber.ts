@@ -106,6 +106,10 @@ export const initMqttSubscriber = (): void => {
       if (topic === MQTT_TOPIC) {
         const rawString = message.toString();
         const trimmed = rawString.trim();
+        // Zarejestruj ingest tak wcześnie jak to możliwe (przyjęcie surowej wiadomości)
+        try {
+          ResourceMonitor.noteIngest();
+        } catch {}
         // quick filter: empty, placeholder, or lacks opening brace
         if (!trimmed || trimmed === 'Brak danych' || trimmed[0] !== '{') {
           filteredNonJson++;
@@ -144,9 +148,22 @@ export const initMqttSubscriber = (): void => {
         accepted++;
 
         // If valid, we can proceed with using the data
+        // readingTime (ms od startu Arduino) => zamień na szacowany epoch: now - delta
+        let sourceIso = new Date().toISOString();
+        try {
+          if (typeof parsed.readingTime === 'number') {
+            const now = Date.now();
+            // Zakładamy że readingTime pochodzi z millis() tego samego cyklu publikacji, więc approximate epoch
+            // Nie mamy bezwzględnego offsetu, więc mapowanie przybliżone; dla E2E ważniejsza jest różnica ingest - source
+            const approx = now - (parsed.readingTime % (24 * 3600 * 1000));
+            if (approx > 0 && Math.abs(now - approx) < 24 * 3600 * 1000) {
+              sourceIso = new Date(approx).toISOString();
+            }
+          }
+        } catch {}
         const recordWithTimestamp: ArduinoResponseTypeWithTimestamp = {
           ...parsed,
-          timestamp: new Date().toISOString(), // e.g. "2025-01-28T12:34:56.789Z"
+          timestamp: sourceIso,
         };
         history.push(recordWithTimestamp);
         // update freshness marker

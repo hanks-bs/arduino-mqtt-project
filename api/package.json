@@ -1,6 +1,6 @@
 {
   "name": "arduino-mqtt-project-api",
-  "version": "2.1.1",
+  "version": "2.4.0",
   "main": "index.js",
   "private": true,
   "module": "ESNext",
