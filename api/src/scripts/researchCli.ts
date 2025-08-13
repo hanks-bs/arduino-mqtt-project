@@ -28,7 +28,10 @@ function printHelp() {
     ],
     ['stable60', '60s×2, 1 Hz, clients=1/1, cpuSampleMs=1000 (ciasne CI)'],
     ['quick', '4s, 1–2 Hz, pair, bez obciążenia (ekspresowy podgląd)'],
-    ['safe', '4s, 0.5–1 Hz, clients=1/1, pair, tick=500ms (bezpieczny minimalny)'],
+    [
+      'safe',
+      '4s, 0.5–1 Hz, clients=1/1, pair, tick=500ms (bezpieczny minimalny)',
+    ],
     ['robust', '60s×2, Hz=0.5,1,2; Load=0,25,50; pair'],
     ['clients', '60s×2, 1 Hz, Load=0,25; clients sets (1,10,25,50); pair'],
     [
@@ -62,7 +65,7 @@ async function main() {
         clientsWs: 1,
         // @ts-expect-error extended flags supported in CLI
         disablePidusage: true,
-  pair: true,
+        pair: true,
       });
       break;
     case 'stable':
@@ -78,8 +81,8 @@ async function main() {
         clientsWs: 1,
         repeats: 2,
         // @ts-expect-error extended flags supported in CLI
-  cpuSampleMs: 1000,
-  pair: true,
+        cpuSampleMs: 1000,
+        pair: true,
       });
       break;
     case 'stable60':
@@ -95,8 +98,8 @@ async function main() {
         clientsWs: 1,
         repeats: 2,
         // @ts-expect-error extended flags supported in CLI
-  cpuSampleMs: 1000,
-  pair: true,
+        cpuSampleMs: 1000,
+        pair: true,
       });
       break;
     case 'quick':
@@ -107,8 +110,8 @@ async function main() {
         durationSec: 4,
         tickMs: 200,
         warmupSec: 0.5 as any,
-  cooldownSec: 0.5 as any,
-  pair: true,
+        cooldownSec: 0.5 as any,
+        pair: true,
       });
       break;
     case 'safe':
@@ -118,11 +121,11 @@ async function main() {
         loadSet: [0],
         durationSec: 4,
         tickMs: 500,
-  clientsHttp: 1,
-  clientsWs: 1,
+        clientsHttp: 1,
+        clientsWs: 1,
         warmupSec: 0.5 as any,
-  cooldownSec: 0.5 as any,
-  pair: true,
+        cooldownSec: 0.5 as any,
+        pair: true,
       });
       break;
     case 'robust':
@@ -166,8 +169,8 @@ async function main() {
         tickMs: 200,
         warmupSec: 4,
         cooldownSec: 4,
-  clientsHttpSet: [1, 10, 25, 50],
-  clientsWsSet: [1, 10, 25, 50],
+        clientsHttpSet: [1, 10, 25, 50],
+        clientsWsSet: [1, 10, 25, 50],
         pair: true,
         repeats: 2,
         // @ts-expect-error extended flags supported in CLI

@@ -4,15 +4,15 @@ Celem jest porównanie dwóch metod dostarczania danych telemetrycznych do klien
 
 ## Hipotezy główne
 
-1) H1 — Staleness: WebSocket dostarcza „świeższe” dane (niższy staleness [ms]) niż HTTP polling przy tych samych częstotliwościach nominalnych (0.5–2 Hz), ponieważ nie czeka na okno odpytywania.
+1. H1 — Staleness: WebSocket dostarcza „świeższe” dane (niższy staleness [ms]) niż HTTP polling przy tych samych częstotliwościach nominalnych (0.5–2 Hz), ponieważ nie czeka na okno odpytywania.
 
-2) H2 — Zależność bajtowa: Dla ustalonych ładunków obowiązuje zależność Bytes/s ≈ Rate × Payload zarówno w WS, jak i HTTP. Odchylenie > 30% wskazuje na problem z pomiarem lub duży jitter/trim.
+2. H2 — Zależność bajtowa: Dla ustalonych ładunków obowiązuje zależność Bytes/s ≈ Rate × Payload zarówno w WS, jak i HTTP. Odchylenie > 30% wskazuje na problem z pomiarem lub duży jitter/trim.
 
-3) H3 — Stabilność interwałów: Jitter [ms] (odchylenie standardowe odstępów) jest niższy dla WS (kontrolowany driver) niż dla HTTP (timery + kolejki event loop).
+3. H3 — Stabilność interwałów: Jitter [ms] (odchylenie standardowe odstępów) jest niższy dla WS (kontrolowany driver) niż dla HTTP (timery + kolejki event loop).
 
-4) H4 — Koszt zasobów: Narzut CPU i ELU p99 rośnie wraz z Hz i liczbą klientów. Do 2 Hz obie metody mieszczą się w akceptowalnym zakresie dla pojedynczej instancji API.
+4. H4 — Koszt zasobów: Narzut CPU i ELU p99 rośnie wraz z Hz i liczbą klientów. Do 2 Hz obie metody mieszczą się w akceptowalnym zakresie dla pojedynczej instancji API.
 
-5) H5 — Skalowalność po klientach: Wzrost liczby klientów zwiększa koszt CPU i I/O szybciej dla HTTP (koszt request/response per klient) niż dla WS (broadcast). 
+5. H5 — Skalowalność po klientach: Wzrost liczby klientów zwiększa koszt CPU i I/O szybciej dla HTTP (koszt request/response per klient) niż dla WS (broadcast).
 
 ## Metryki i kryteria weryfikacji
 
@@ -23,7 +23,7 @@ Celem jest porównanie dwóch metod dostarczania danych telemetrycznych do klien
 
 ## Uwagi metodologiczne
 
-- WS liczy emisje (nie mnożymy przez liczbę klientów); Bytes/s w WS rosną wraz z liczbą klientów (broadcast). 
+- WS liczy emisje (nie mnożymy przez liczbę klientów); Bytes/s w WS rosną wraz z liczbą klientów (broadcast).
 - HTTP przy 0 klientach nie generuje ruchu — takie wiersze nie są porównywalne z WS i są pomijane w tabelach „WS vs HTTP”.
 - Źródło danych (Arduino) zwykle publikuje ~1 Hz. Przy Hz>1 testujemy zdolność transportu i obciążenie serwera, a nie świeżość danych (staleness pozostaje blisko 1000 ms).
 

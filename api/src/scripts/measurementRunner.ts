@@ -196,9 +196,13 @@ function summarizeSession(s: SessionRecord) {
   const ci95BytesStd =
     1.96 * (bytesSeries.length ? bytesStd / Math.sqrt(bytesSeries.length) : 0);
   const ci95JitterStd =
-    1.96 * (jitterSeries.length ? jitterStd / Math.sqrt(jitterSeries.length) : 0);
+    1.96 *
+    (jitterSeries.length ? jitterStd / Math.sqrt(jitterSeries.length) : 0);
   const ci95StalenessStd =
-    1.96 * (stalenessSeries.length ? stalenessStd / Math.sqrt(stalenessSeries.length) : 0);
+    1.96 *
+    (stalenessSeries.length
+      ? stalenessStd / Math.sqrt(stalenessSeries.length)
+      : 0);
   // Fallback Poissona dla rzadkich zdarzeń (stabilizuje CI przy bardzo małych średnich)
   const eventsApprox = Math.max(0, Math.round(totalMsgsApprox));
   const ci95RatePois =
@@ -220,7 +224,10 @@ function summarizeSession(s: SessionRecord) {
   const percentile = (a: number[], p: number) => {
     if (!a.length) return 0;
     const sorted = a.slice().sort((x, y) => x - y);
-    const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor((p / 100) * (sorted.length - 1))));
+    const idx = Math.min(
+      sorted.length - 1,
+      Math.max(0, Math.floor((p / 100) * (sorted.length - 1))),
+    );
     return sorted[idx];
   };
   const trimmedMean = (a: number[], frac: number) => {
@@ -320,7 +327,8 @@ function summarizeSession(s: SessionRecord) {
   // E2E latencje (ms) wyliczone z telemetrii znaczników czasu
   const srcToIngest = samples
     .map(m =>
-      Number.isFinite(m.sourceTsMs as any) && Number.isFinite(m.ingestTsMs as any)
+      Number.isFinite(m.sourceTsMs as any) &&
+      Number.isFinite(m.ingestTsMs as any)
         ? (m.ingestTsMs as number) - (m.sourceTsMs as number)
         : NaN,
     )
@@ -346,11 +354,18 @@ function summarizeSession(s: SessionRecord) {
   const p95IngestToEmitMs = percentile(ingestToEmit, 95);
   const p95SrcToEmitMs = percentile(srcToEmit, 95);
   const ci95SrcToIngestMs =
-    1.96 * (srcToIngest.length ? stddev(srcToIngest) / Math.sqrt(srcToIngest.length) : 0);
+    1.96 *
+    (srcToIngest.length
+      ? stddev(srcToIngest) / Math.sqrt(srcToIngest.length)
+      : 0);
   const ci95IngestToEmitMs =
-    1.96 * (ingestToEmit.length ? stddev(ingestToEmit) / Math.sqrt(ingestToEmit.length) : 0);
+    1.96 *
+    (ingestToEmit.length
+      ? stddev(ingestToEmit) / Math.sqrt(ingestToEmit.length)
+      : 0);
   const ci95SrcToEmitMs =
-    1.96 * (srcToEmit.length ? stddev(srcToEmit) / Math.sqrt(srcToEmit.length) : 0);
+    1.96 *
+    (srcToEmit.length ? stddev(srcToEmit) / Math.sqrt(srcToEmit.length) : 0);
   return {
     id: s.id,
     label: s.config.label,
@@ -387,24 +402,24 @@ function summarizeSession(s: SessionRecord) {
     bytesPerUnit,
     ratePerClient,
     bytesRatePerClient,
-  bytesRatePerClientServer,
-  egressBytesRateEst,
-  avgJitterMs: sum.jitter / n,
-  jitterStd,
-  ci95Jitter,
-  avgFreshnessMs: sum.fresh / n,
-  avgStalenessMs: sum.fresh / n,
-  stalenessStd,
-  ci95Staleness,
-  avgSrcToIngestMs,
-  p95SrcToIngestMs,
-  ci95SrcToIngestMs,
-  avgIngestToEmitMs,
-  p95IngestToEmitMs,
-  ci95IngestToEmitMs,
-  avgSrcToEmitMs,
-  p95SrcToEmitMs,
-  ci95SrcToEmitMs,
+    bytesRatePerClientServer,
+    egressBytesRateEst,
+    avgJitterMs: sum.jitter / n,
+    jitterStd,
+    ci95Jitter,
+    avgFreshnessMs: sum.fresh / n,
+    avgStalenessMs: sum.fresh / n,
+    stalenessStd,
+    ci95Staleness,
+    avgSrcToIngestMs,
+    p95SrcToIngestMs,
+    ci95SrcToIngestMs,
+    avgIngestToEmitMs,
+    p95IngestToEmitMs,
+    ci95IngestToEmitMs,
+    avgSrcToEmitMs,
+    p95SrcToEmitMs,
+    ci95SrcToEmitMs,
   };
 }
 
@@ -1011,7 +1026,7 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
         payload: 'B',
         jitter: 'ms',
         staleness: 'ms',
-  latency: 'ms',
+        latency: 'ms',
         tick: 'ms',
         elDelayP99: 'ms',
         cpu: '%',
@@ -1528,7 +1543,8 @@ ${evaluated
 |---|---:|---:|---:|---:|---:|---:|
 ${evaluated
   .map(s => {
-    const f = (v: any, d = 1) => (Number.isFinite(Number(v)) ? Number(v).toFixed(d) : '—');
+    const f = (v: any, d = 1) =>
+      Number.isFinite(Number(v)) ? Number(v).toFixed(d) : '—';
     return `| ${s.label} | ${f((s as any).avgSrcToIngestMs)} | ${f((s as any).p95SrcToIngestMs)} | ${f((s as any).avgIngestToEmitMs)} | ${f((s as any).p95IngestToEmitMs)} | ${f((s as any).avgSrcToEmitMs)} | ${f((s as any).p95SrcToEmitMs)} |`;
   })
   .join('\n')}
@@ -1588,15 +1604,14 @@ function renderByClientsTables(rows: ReturnType<typeof aggregateByClients>) {
   const render = (mode: 'ws' | 'polling') => {
     const modeRows = rows.filter(r => r.mode === mode);
     const lines = modeRows
-      .map(
-        r => {
-          const N = Math.max(0, Number(r.clients ?? 0));
-          const egress = mode === 'ws'
+      .map(r => {
+        const N = Math.max(0, Number(r.clients ?? 0));
+        const egress =
+          mode === 'ws'
             ? Number(r.avgRate) * Number(r.avgPayload) * N
             : Number(r.avgBytesRate);
-          return `| ${r.clients} | ${fmt(r.avgRate, 2)} | ${fmt((r as any).avgRatePerClient ?? 0, 2)} | ${fmt(r.avgBytesRate, 0)} | ${fmt((r as any).avgBytesPerClient ?? 0, 0)} | ${fmt(egress, 0)} | ${fmt(r.avgPayload, 0)} | ${fmt(r.avgJitterMs, 1)} | ${fmt(r.avgDelayP99, 1)} | ${fmt(r.avgCpu, 1)} | ${fmt(r.avgRss, 1)} |`;
-        },
-      )
+        return `| ${r.clients} | ${fmt(r.avgRate, 2)} | ${fmt((r as any).avgRatePerClient ?? 0, 2)} | ${fmt(r.avgBytesRate, 0)} | ${fmt((r as any).avgBytesPerClient ?? 0, 0)} | ${fmt(egress, 0)} | ${fmt(r.avgPayload, 0)} | ${fmt(r.avgJitterMs, 1)} | ${fmt(r.avgDelayP99, 1)} | ${fmt(r.avgCpu, 1)} | ${fmt(r.avgRss, 1)} |`;
+      })
       .join('\n');
     const title = mode === 'ws' ? 'WebSocket' : 'HTTP polling';
     return `### ${title}

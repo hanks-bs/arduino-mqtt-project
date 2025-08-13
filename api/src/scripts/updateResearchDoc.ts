@@ -184,7 +184,8 @@ async function main() {
           : clients > 0 && Number.isFinite(Number(s.bytesRatePerClient))
             ? Number(s.bytesRatePerClient)
             : NaN;
-      const rep = s.repIndex && s.repTotal ? ` [rep ${s.repIndex}/${s.repTotal}]` : '';
+      const rep =
+        s.repIndex && s.repTotal ? ` [rep ${s.repIndex}/${s.repTotal}]` : '';
       const fmt = (n: number, f = 2) =>
         Number.isFinite(n) ? n.toFixed(f) : '—';
       const stale = Number.isFinite(Number((s as any).avgStalenessMs))
@@ -206,7 +207,7 @@ async function main() {
     ? '\nUwaga: Etykiety @Hz odnoszą się do tempa transportu, ale run ograniczony przez źródło; różnice WS vs HTTP w Rate nie są miarodajne.'
     : '';
   const clientsZeroNote =
-  '\nUwaga: Scenariusze z liczbą klientów = 0 mają różną semantykę: WS (push) emituje niezależnie od liczby klientów — per‑client raportujemy Rate/cli = Rate oraz Bytes/cli ≈ Rate×Payload; HTTP (pull) przy 0 klientach nie generuje żądań → pola per‑client są puste (—). Dlatego w porównaniach WS vs HTTP ("Zwycięzcy", tabele WS vs HTTP) wiersze HTTP z N=0 są pomijane.';
+    '\nUwaga: Scenariusze z liczbą klientów = 0 mają różną semantykę: WS (push) emituje niezależnie od liczby klientów — per‑client raportujemy Rate/cli = Rate oraz Bytes/cli ≈ Rate×Payload; HTTP (pull) przy 0 klientach nie generuje żądań → pola per‑client są puste (—). Dlatego w porównaniach WS vs HTTP ("Zwycięzcy", tabele WS vs HTTP) wiersze HTTP z N=0 są pomijane.';
   const example = renderPerClientExample(items);
   const block = `Ostatni run: ${latest}
 
@@ -438,8 +439,9 @@ function renderE2ELatency(items: Array<any>): string {
     const f = (v: any, d = 1) =>
       Number.isFinite(Number(v)) ? Number(v).toFixed(d) : '—';
     const rows = items
-      .map(s =>
-        `| ${s.label} | ${f((s as any).avgSrcToIngestMs)} | ${f((s as any).p95SrcToIngestMs)} | ${f((s as any).avgIngestToEmitMs)} | ${f((s as any).p95IngestToEmitMs)} | ${f((s as any).avgSrcToEmitMs)} | ${f((s as any).p95SrcToEmitMs)} |`,
+      .map(
+        s =>
+          `| ${s.label} | ${f((s as any).avgSrcToIngestMs)} | ${f((s as any).p95SrcToIngestMs)} | ${f((s as any).avgIngestToEmitMs)} | ${f((s as any).p95IngestToEmitMs)} | ${f((s as any).avgSrcToEmitMs)} | ${f((s as any).p95SrcToEmitMs)} |`,
       )
       .join('\n');
     return `\n${header}\n${rows}\n`;
@@ -785,17 +787,20 @@ function renderPairedComparisons(items: Array<any>): string {
     for (const s of items) {
       const hz = parseHz(s.label);
       const load = Number(s.loadCpuPct ?? 0);
-      const clients = s.mode === 'ws' ? Number(s.clientsWs ?? 0) : Number(s.clientsHttp ?? 0);
+      const clients =
+        s.mode === 'ws' ? Number(s.clientsWs ?? 0) : Number(s.clientsHttp ?? 0);
       const active = Number(s.avgRate) > 0 || Number(s.avgBytesRate) > 0;
       if (!active || clients <= 0) continue;
       const key = `Hz=${Number.isFinite(hz) ? hz : '—'}|Load=${load}|Clients=${clients}`;
       const g = buckets.get(key) || { k: key };
-      if (s.mode === 'ws') g.ws = s; else if (s.mode === 'polling') g.http = s;
+      if (s.mode === 'ws') g.ws = s;
+      else if (s.mode === 'polling') g.http = s;
       buckets.set(key, g);
     }
     const keys = Array.from(buckets.keys()).sort();
     const header = `\n\n## Porównania parowane (WS vs HTTP, per klient, z Δ i istotnością)\n\nLegenda: Δ% = (WS−HTTP)/HTTP·100%; Istotność (95% CI): "sig" gdy przedziały [mean±CI] dla Rate/cli nie nachodzą się (dla HTTP CI skalowane 1/N).\n\n| Scenariusz | Rate/cli WS [/s] | Rate/cli HTTP [/s] | Δ Rate/cli [%] | Istotność (95% CI) | Jitter WS [ms] | Jitter HTTP [ms] | Δ Jitter [%] | Staleness WS [ms] | Staleness HTTP [ms] | Δ Stal. [%] | CPU WS [%] | CPU HTTP [%] | Δ CPU [pp] | RSS WS [MB] | RSS HTTP [MB] | Δ RSS [MB] |`;
-    const sep = '\n|---|---:|---:|---:|:--:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|';
+    const sep =
+      '\n|---|---:|---:|---:|:--:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|';
     const fmt = (n: number, f = 2) => (Number.isFinite(n) ? n.toFixed(f) : '—');
     const rows: string[] = [];
     for (const k of keys) {
@@ -804,27 +809,55 @@ function renderPairedComparisons(items: Array<any>): string {
       const ws = g.ws as any;
       const http = g.http as any;
       const N = Number(http.clientsHttp ?? ws.clientsWs ?? 0) || 1;
-      const rateWs = Number.isFinite(Number(ws.ratePerClient)) ? Number(ws.ratePerClient) : Number(ws.avgRate);
-      const rateHttp = Number.isFinite(Number(http.ratePerClient)) ? Number(http.ratePerClient) : Number(http.avgRate) / Math.max(1, N);
-      const deltaRate = Number.isFinite(rateWs) && Number.isFinite(rateHttp) && rateHttp !== 0 ? ((rateWs - rateHttp) / Math.abs(rateHttp)) * 100 : NaN;
+      const rateWs = Number.isFinite(Number(ws.ratePerClient))
+        ? Number(ws.ratePerClient)
+        : Number(ws.avgRate);
+      const rateHttp = Number.isFinite(Number(http.ratePerClient))
+        ? Number(http.ratePerClient)
+        : Number(http.avgRate) / Math.max(1, N);
+      const deltaRate =
+        Number.isFinite(rateWs) && Number.isFinite(rateHttp) && rateHttp !== 0
+          ? ((rateWs - rateHttp) / Math.abs(rateHttp)) * 100
+          : NaN;
       const ciWs = Number(ws.ci95Rate ?? NaN);
       const ciHttp = Number(http.ci95Rate ?? NaN) / Math.max(1, N);
-      const sig = Number.isFinite(rateWs) && Number.isFinite(rateHttp) && Number.isFinite(ciWs) && Number.isFinite(ciHttp)
-        ? ((rateWs - ciWs) > (rateHttp + ciHttp) || (rateHttp - ciHttp) > (rateWs + ciWs) ? 'sig' : 'ns')
-        : '—';
+      const sig =
+        Number.isFinite(rateWs) &&
+        Number.isFinite(rateHttp) &&
+        Number.isFinite(ciWs) &&
+        Number.isFinite(ciHttp)
+          ? rateWs - ciWs > rateHttp + ciHttp ||
+            rateHttp - ciHttp > rateWs + ciWs
+            ? 'sig'
+            : 'ns'
+          : '—';
       const jitWs = Number(ws.avgJitterMs);
       const jitHttp = Number(http.avgJitterMs);
-      const dJit = Number.isFinite(jitWs) && Number.isFinite(jitHttp) && jitHttp !== 0 ? ((jitWs - jitHttp) / Math.abs(jitHttp)) * 100 : NaN;
+      const dJit =
+        Number.isFinite(jitWs) && Number.isFinite(jitHttp) && jitHttp !== 0
+          ? ((jitWs - jitHttp) / Math.abs(jitHttp)) * 100
+          : NaN;
       const stWs = Number(ws.avgFreshnessMs);
       const stHttp = Number(http.avgFreshnessMs);
-      const dSt = Number.isFinite(stWs) && Number.isFinite(stHttp) && stHttp !== 0 ? ((stWs - stHttp) / Math.abs(stHttp)) * 100 : NaN;
+      const dSt =
+        Number.isFinite(stWs) && Number.isFinite(stHttp) && stHttp !== 0
+          ? ((stWs - stHttp) / Math.abs(stHttp)) * 100
+          : NaN;
       const cpuWs = Number(ws.avgCpu);
       const cpuHttp = Number(http.avgCpu);
-      const dCpu = Number.isFinite(cpuWs) && Number.isFinite(cpuHttp) ? (cpuWs - cpuHttp) : NaN;
+      const dCpu =
+        Number.isFinite(cpuWs) && Number.isFinite(cpuHttp)
+          ? cpuWs - cpuHttp
+          : NaN;
       const rssWs = Number(ws.avgRss);
       const rssHttp = Number(http.avgRss);
-      const dRss = Number.isFinite(rssWs) && Number.isFinite(rssHttp) ? (rssWs - rssHttp) : NaN;
-      rows.push(`| ${k} | ${fmt(rateWs)} | ${fmt(rateHttp)} | ${fmt(deltaRate, 0)}% | ${sig} | ${fmt(jitWs, 1)} | ${fmt(jitHttp, 1)} | ${fmt(dJit, 0)}% | ${fmt(stWs, 0)} | ${fmt(stHttp, 0)} | ${fmt(dSt, 0)}% | ${fmt(cpuWs, 1)} | ${fmt(cpuHttp, 1)} | ${fmt(dCpu, 1)} | ${fmt(rssWs, 1)} | ${fmt(rssHttp, 1)} | ${fmt(dRss, 1)} |`);
+      const dRss =
+        Number.isFinite(rssWs) && Number.isFinite(rssHttp)
+          ? rssWs - rssHttp
+          : NaN;
+      rows.push(
+        `| ${k} | ${fmt(rateWs)} | ${fmt(rateHttp)} | ${fmt(deltaRate, 0)}% | ${sig} | ${fmt(jitWs, 1)} | ${fmt(jitHttp, 1)} | ${fmt(dJit, 0)}% | ${fmt(stWs, 0)} | ${fmt(stHttp, 0)} | ${fmt(dSt, 0)}% | ${fmt(cpuWs, 1)} | ${fmt(cpuHttp, 1)} | ${fmt(dCpu, 1)} | ${fmt(rssWs, 1)} | ${fmt(rssHttp, 1)} | ${fmt(dRss, 1)} |`,
+      );
     }
     if (!rows.length) return '';
     return `${header}${sep}\n${rows.join('\n')}\n`;
@@ -886,16 +919,22 @@ function renderTLDR(items: Array<any>): string {
   try {
     if (!items || items.length === 0) return '';
     const eligible = items.filter(s => {
-      const clients = s.mode === 'ws' ? Number(s.clientsWs ?? 0) : Number(s.clientsHttp ?? 0);
+      const clients =
+        s.mode === 'ws' ? Number(s.clientsWs ?? 0) : Number(s.clientsHttp ?? 0);
       const active = Number(s.avgRate) > 0 || Number(s.avgBytesRate) > 0;
       return active && clients > 0;
     });
     if (eligible.length < 2) return '';
-    const part = (mode: 'ws' | 'polling') => eligible.filter(s => s.mode === mode);
-    const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN);
+    const part = (mode: 'ws' | 'polling') =>
+      eligible.filter(s => s.mode === mode);
+    const avg = (a: number[]) =>
+      a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
     const rateCli = (s: any) => {
-      const n = s.mode === 'ws' ? Number(s.clientsWs ?? 0) : Number(s.clientsHttp ?? 0);
-      const v = Number.isFinite(Number(s.ratePerClient)) ? Number(s.ratePerClient) : Number(s.avgRate);
+      const n =
+        s.mode === 'ws' ? Number(s.clientsWs ?? 0) : Number(s.clientsHttp ?? 0);
+      const v = Number.isFinite(Number(s.ratePerClient))
+        ? Number(s.ratePerClient)
+        : Number(s.avgRate);
       return n > 0 ? v : NaN;
     };
     const ws = part('ws');
@@ -912,7 +951,7 @@ function renderTLDR(items: Array<any>): string {
     const f1 = (n: number) => (Number.isFinite(n) ? n.toFixed(1) : '—');
     const f0 = (n: number) => (Number.isFinite(n) ? n.toFixed(0) : '—');
     const bullets = [
-  `- Porównuj per klienta: Rate/cli i Bytes/cli; WS: Bytes/cli ≈ Rate × Payload; egress ≈ Rate × Payload × N.`,
+      `- Porównuj per klienta: Rate/cli i Bytes/cli; WS: Bytes/cli ≈ Rate × Payload; egress ≈ Rate × Payload × N.`,
       `- Ten run (średnio): Rate/cli — WS ${fmt(wsRate)} /s vs HTTP ${fmt(httpRate)} /s; Jitter — WS ${f1(wsJit)} ms vs HTTP ${f1(httpJit)} ms; Staleness — WS ${f0(wsFresh)} ms vs HTTP ${f0(httpFresh)} ms; CPU — WS ${f1(wsCpu)}% vs HTTP ${f1(httpCpu)}%.`,
       `- Gdy 95% CI (Metrologia) nakładają się, uznawaj różnice za niejednoznaczne.`,
     ].join('\n');

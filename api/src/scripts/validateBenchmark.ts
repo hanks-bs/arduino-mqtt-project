@@ -48,7 +48,10 @@ async function main() {
       if (!st.isDirectory()) continue;
       const hasSummary = await fs.pathExists(path.join(p, 'summary.json'));
       if (!hasSummary) continue;
-      candidates.push({ name: n, mtimeMs: st.mtimeMs || st.mtime.getTime?.() || 0 });
+      candidates.push({
+        name: n,
+        mtimeMs: st.mtimeMs || st.mtime.getTime?.() || 0,
+      });
     } catch {}
   }
   if (!candidates.length) throw new Error('Brak plików summary.json');
@@ -164,8 +167,8 @@ async function main() {
       s.mode === 'ws'
         ? getClientsFromLabel(s.label, 'cWs')
         : getClientsFromLabel(s.label, 'cHttp');
-  // Default to 0 (not 1), to avoid fabricating activity when clients were explicitly 0
-  const clients = declaredClients ?? labelClients ?? 0;
+    // Default to 0 (not 1), to avoid fabricating activity when clients were explicitly 0
+    const clients = declaredClients ?? labelClients ?? 0;
     const expRate = s.expectedRate; // may already be scaled by clients (measurementRunner.evaluate)
     const expPayload = s.expectedPayload;
     // sample size
@@ -189,15 +192,25 @@ async function main() {
         );
     }
     // CI dla jitter/staleness
-    if (Number.isFinite(s.avgJitterMs) && Number(s.avgJitterMs) > 0 && Number.isFinite(s.ci95Jitter)) {
+    if (
+      Number.isFinite(s.avgJitterMs) &&
+      Number(s.avgJitterMs) > 0 &&
+      Number.isFinite(s.ci95Jitter)
+    ) {
       const rel = (s.ci95Jitter || 0) / (s.avgJitterMs || 1);
       if (rel > ciThreshJitter)
         warn.push(
           `${s.label}: szeroki CI Jitter (±${(rel * 100).toFixed(0)}% średniej)`,
         );
     }
-    const staleAvg = Number.isFinite(Number(s.avgStalenessMs)) ? Number(s.avgStalenessMs) : Number(s.avgFreshnessMs);
-    if (Number.isFinite(staleAvg) && staleAvg > 0 && Number.isFinite(s.ci95Staleness)) {
+    const staleAvg = Number.isFinite(Number(s.avgStalenessMs))
+      ? Number(s.avgStalenessMs)
+      : Number(s.avgFreshnessMs);
+    if (
+      Number.isFinite(staleAvg) &&
+      staleAvg > 0 &&
+      Number.isFinite(s.ci95Staleness)
+    ) {
       const rel = (s.ci95Staleness || 0) / (staleAvg || 1);
       if (rel > ciThreshStale)
         warn.push(
@@ -230,7 +243,8 @@ async function main() {
     }
     if (expPayload != null && s.tolPayload != null && s.bytesPerUnit != null) {
       // Skip payload check when no activity (avgRate==0) or clients==0 for polling
-      const noActivity = s.avgRate === 0 || (s.mode === 'polling' && clients === 0);
+      const noActivity =
+        s.avgRate === 0 || (s.mode === 'polling' && clients === 0);
       if (!noActivity) {
         const low = expPayload * (1 - s.tolPayload);
         const high = expPayload * (1 + s.tolPayload);
@@ -248,11 +262,15 @@ async function main() {
     const oneHz = items.filter(s => /@1(?:\.0+)?Hz/.test(s.label));
     const byKey = new Map<string, { ws?: Item; http?: Item }>();
     for (const s of oneHz) {
-      const load = (s.label.match(/load=(\d+)%/)?.[1] ?? '0');
-      const clients = s.mode === 'ws' ? String(s.clientsWs ?? s.label.match(/cWs=(\d+)/)?.[1] ?? '0') : String(s.clientsHttp ?? s.label.match(/cHttp=(\d+)/)?.[1] ?? '0');
+      const load = s.label.match(/load=(\d+)%/)?.[1] ?? '0';
+      const clients =
+        s.mode === 'ws'
+          ? String(s.clientsWs ?? s.label.match(/cWs=(\d+)/)?.[1] ?? '0')
+          : String(s.clientsHttp ?? s.label.match(/cHttp=(\d+)/)?.[1] ?? '0');
       const key = `L${load}|C${clients}`;
       const g = byKey.get(key) || {};
-      if (s.mode === 'ws') g.ws = s; else g.http = s;
+      if (s.mode === 'ws') g.ws = s;
+      else g.http = s;
       byKey.set(key, g);
     }
     for (const [k, g] of byKey) {
@@ -262,7 +280,9 @@ async function main() {
       if (Number.isFinite(jw) && Number.isFinite(jh) && jh > 0) {
         const rel = (jw - jh) / jh; // ujemny gdy WS mniejszy (lepszy)
         if (rel > -0.25) {
-          warn.push(`Jitter WS nie wyraźnie mniejszy niż HTTP przy 1Hz (${k}): WS=${jw.toFixed(1)} ms, HTTP=${jh.toFixed(1)} ms`);
+          warn.push(
+            `Jitter WS nie wyraźnie mniejszy niż HTTP przy 1Hz (${k}): WS=${jw.toFixed(1)} ms, HTTP=${jh.toFixed(1)} ms`,
+          );
         }
       }
     }

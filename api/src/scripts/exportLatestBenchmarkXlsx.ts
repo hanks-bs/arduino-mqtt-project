@@ -78,12 +78,18 @@ async function main() {
       k: 'clientsWs',
       v: String(summary.runConfig?.clientsWs ?? ''),
     });
-  ws.addRow({ k: 'wsPayload', v: String(summary.runConfig?.wsPayload ?? '') });
-  ws.addRow({ k: 'httpPayload', v: String(summary.runConfig?.httpPayload ?? '') });
-  ws.addRow({ k: 'repeats', v: String(summary.runConfig?.repeats ?? '') });
-  const flags = summary.flags || {};
-  ws.addRow({ k: 'fairPayload', v: String(flags.fairPayload ?? '') });
-  ws.addRow({ k: 'sourceLimited', v: String(flags.sourceLimited ?? '') });
+    ws.addRow({
+      k: 'wsPayload',
+      v: String(summary.runConfig?.wsPayload ?? ''),
+    });
+    ws.addRow({
+      k: 'httpPayload',
+      v: String(summary.runConfig?.httpPayload ?? ''),
+    });
+    ws.addRow({ k: 'repeats', v: String(summary.runConfig?.repeats ?? '') });
+    const flags = summary.flags || {};
+    ws.addRow({ k: 'fairPayload', v: String(flags.fairPayload ?? '') });
+    ws.addRow({ k: 'sourceLimited', v: String(flags.sourceLimited ?? '') });
   }
 
   // Summary sheet
@@ -118,33 +124,59 @@ async function main() {
       { header: 'Src→Emit p95 [ms]', key: 'l3p', width: 16 },
     ];
     for (const s of items) {
-      const stale = Number.isFinite(Number(s.avgStalenessMs)) ? Number(s.avgStalenessMs) : Number(s.avgFreshnessMs);
+      const stale = Number.isFinite(Number(s.avgStalenessMs))
+        ? Number(s.avgStalenessMs)
+        : Number(s.avgFreshnessMs);
       ws.addRow({
         label: s.label,
         mode: s.mode,
         rate: Number(s.avgRate?.toFixed?.(2) ?? s.avgRate ?? ''),
-        rateCli: Number.isFinite(Number(s.ratePerClient)) ? Number(Number(s.ratePerClient).toFixed(2)) : '',
+        rateCli: Number.isFinite(Number(s.ratePerClient))
+          ? Number(Number(s.ratePerClient).toFixed(2))
+          : '',
         bytes: Number(s.avgBytesRate?.toFixed?.(0) ?? s.avgBytesRate ?? ''),
-        bytesCli: Number.isFinite(Number(s.bytesRatePerClient)) ? Number(Number(s.bytesRatePerClient).toFixed(0)) : '',
-        bytesCliSrv: Number.isFinite(Number(s.bytesRatePerClientServer)) ? Number(Number(s.bytesRatePerClientServer).toFixed(0)) : '',
-        egress: Number.isFinite(Number(s.egressBytesRateEst)) ? Number(Number(s.egressBytesRateEst).toFixed(0)) : '',
+        bytesCli: Number.isFinite(Number(s.bytesRatePerClient))
+          ? Number(Number(s.bytesRatePerClient).toFixed(0))
+          : '',
+        bytesCliSrv: Number.isFinite(Number(s.bytesRatePerClientServer))
+          ? Number(Number(s.bytesRatePerClientServer).toFixed(0))
+          : '',
+        egress: Number.isFinite(Number(s.egressBytesRateEst))
+          ? Number(Number(s.egressBytesRateEst).toFixed(0))
+          : '',
         payload: Number(s.avgPayload?.toFixed?.(0) ?? s.avgPayload ?? ''),
         jitter: Number(s.avgJitterMs?.toFixed?.(1) ?? s.avgJitterMs ?? ''),
-        ciJit: Number.isFinite(Number(s.ci95Jitter)) ? Number(Number(s.ci95Jitter).toFixed(1)) : '',
+        ciJit: Number.isFinite(Number(s.ci95Jitter))
+          ? Number(Number(s.ci95Jitter).toFixed(1))
+          : '',
         fresh: Number.isFinite(stale) ? Number(stale.toFixed(0)) : '',
-        ciFresh: Number.isFinite(Number(s.ci95Staleness)) ? Number(Number(s.ci95Staleness).toFixed(0)) : '',
+        ciFresh: Number.isFinite(Number(s.ci95Staleness))
+          ? Number(Number(s.ci95Staleness).toFixed(0))
+          : '',
         elp: Number(s.avgDelayP99?.toFixed?.(1) ?? s.avgDelayP99 ?? ''),
         cpu: Number(s.avgCpu?.toFixed?.(1) ?? s.avgCpu ?? ''),
         rss: Number(s.avgRss?.toFixed?.(1) ?? s.avgRss ?? ''),
         n: `${s.nUsed ?? s.count}/${s.nTotal ?? s.count}`,
         rateok: s.rateOk === undefined ? '' : s.rateOk ? 'OK' : 'NOK',
         pk: s.payloadOk === undefined ? '' : s.payloadOk ? 'OK' : 'NOK',
-        l1a: Number.isFinite(Number(s.avgSrcToIngestMs)) ? Number(Number(s.avgSrcToIngestMs).toFixed(1)) : '',
-        l1p: Number.isFinite(Number(s.p95SrcToIngestMs)) ? Number(Number(s.p95SrcToIngestMs).toFixed(1)) : '',
-        l2a: Number.isFinite(Number(s.avgIngestToEmitMs)) ? Number(Number(s.avgIngestToEmitMs).toFixed(1)) : '',
-        l2p: Number.isFinite(Number(s.p95IngestToEmitMs)) ? Number(Number(s.p95IngestToEmitMs).toFixed(1)) : '',
-        l3a: Number.isFinite(Number(s.avgSrcToEmitMs)) ? Number(Number(s.avgSrcToEmitMs).toFixed(1)) : '',
-        l3p: Number.isFinite(Number(s.p95SrcToEmitMs)) ? Number(Number(s.p95SrcToEmitMs).toFixed(1)) : '',
+        l1a: Number.isFinite(Number(s.avgSrcToIngestMs))
+          ? Number(Number(s.avgSrcToIngestMs).toFixed(1))
+          : '',
+        l1p: Number.isFinite(Number(s.p95SrcToIngestMs))
+          ? Number(Number(s.p95SrcToIngestMs).toFixed(1))
+          : '',
+        l2a: Number.isFinite(Number(s.avgIngestToEmitMs))
+          ? Number(Number(s.avgIngestToEmitMs).toFixed(1))
+          : '',
+        l2p: Number.isFinite(Number(s.p95IngestToEmitMs))
+          ? Number(Number(s.p95IngestToEmitMs).toFixed(1))
+          : '',
+        l3a: Number.isFinite(Number(s.avgSrcToEmitMs))
+          ? Number(Number(s.avgSrcToEmitMs).toFixed(1))
+          : '',
+        l3p: Number.isFinite(Number(s.p95SrcToEmitMs))
+          ? Number(Number(s.p95SrcToEmitMs).toFixed(1))
+          : '',
       });
     }
   }
