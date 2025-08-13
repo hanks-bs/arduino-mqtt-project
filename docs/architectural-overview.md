@@ -20,13 +20,12 @@ System realizuje akwizycję danych sensorycznych z Arduino, ich ujednolicenie w 
 1. Arduino generuje linię JSON zakończoną `\n` (lub tekst zastępczy jeśli brak danych).
 2. Bridge (lub SerialService w Linux) czyta linie, waliduje JSON, publikuje do MQTT (`arduino/sensordata`).
 3. API:
+   - subskrybuje topic i aktualizuje ostatnią próbkę + historię (w pamięci),
 
-- subskrybuje topic i aktualizuje ostatnią próbkę + historię (w pamięci),
-- okresowo (co ~1 s) publikuje metryki i może retransmitować dane (wg konfiguracji),
+- periodicznie (co ~1 s) publikuje metryki i może retransmitować dane (zależnie od konfiguracji),
 - emituje dane do klientów przez Socket.IO event `arduinoData`.
 
-1. UI odbiera eventy i aktualizuje wykresy/komponenty.
-
+1. UI odbiera eventy i aktualizuje wykresy / komponenty.
 2. Resource Monitor co sekundę oblicza metryki i wysyła event `metrics`.
 
 ### 3.1 Diagram przepływu (Mermaid)
@@ -108,14 +107,14 @@ Przykładowy pakiet JSON (minimalny kontrakt):
 
 ```json
 {
-  "potValue": 512,
-  "voltagePot": 2.5,
-  "lm35Value": 150,
-  "voltageLM35": 1.5,
-  "temperature": 30.0,
-  "readingTime": 2,
-  "uptimeSec": 1234,
-  "readingCount": 678
+	"potValue": 512,
+	"voltagePot": 2.5,
+	"lm35Value": 150,
+	"voltageLM35": 1.5,
+	"temperature": 30.0,
+	"readingTime": 2,
+	"uptimeSec": 1234,
+	"readingCount": 678
 }
 ```
 
@@ -126,30 +125,30 @@ Uwaga:
 
 ```json
 {
-  "lastMeasurement": {
-    "potValue": 512,
-    "voltagePot": 2.5,
-    "lm35Value": 150,
-    "voltageLM35": 1.5,
-    "temperature": 30.0,
-    "readingTime": 2,
-    "uptimeSec": 1234,
-    "readingCount": 678,
-    "timestamp": "2025-08-09T12:34:56.789Z"
-  },
-  "history": [
-    {
-      "potValue": 508,
-      "voltagePot": 2.48,
-      "lm35Value": 148,
-      "voltageLM35": 1.48,
-      "temperature": 29.6,
-      "readingTime": 2,
-      "uptimeSec": 1232,
-      "readingCount": 677,
-      "timestamp": "2025-08-09T12:34:54.789Z"
-    }
-  ]
+	"lastMeasurement": {
+		"potValue": 512,
+		"voltagePot": 2.5,
+		"lm35Value": 150,
+		"voltageLM35": 1.5,
+		"temperature": 30.0,
+		"readingTime": 2,
+		"uptimeSec": 1234,
+		"readingCount": 678,
+		"timestamp": "2025-08-09T12:34:56.789Z"
+	},
+	"history": [
+		{
+			"potValue": 508,
+			"voltagePot": 2.48,
+			"lm35Value": 148,
+			"voltageLM35": 1.48,
+			"temperature": 29.6,
+			"readingTime": 2,
+			"uptimeSec": 1232,
+			"readingCount": 677,
+			"timestamp": "2025-08-09T12:34:54.789Z"
+		}
+	]
 }
 ```
 
@@ -357,14 +356,14 @@ const N = parseInt(process.env.N || "10", 10);
 const URL = process.env.URL || "http://localhost:5000";
 let received = 0;
 for (let i = 0; i < N; i++) {
-  const s = io(URL, { transports: ["websocket"] });
-  s.on("arduinoData", () => {
-    received++;
-  });
+	const s = io(URL, { transports: ["websocket"] });
+	s.on("arduinoData", () => {
+		received++;
+	});
 }
 setInterval(() => {
-  console.log("WS messages total:", received);
-  received = 0;
+	console.log("WS messages total:", received);
+	received = 0;
 }, 5000);
 ```
 
@@ -376,11 +375,11 @@ const N = parseInt(process.env.N || "10", 10);
 const INTERVAL = parseInt(process.env.INTERVAL || "1000", 10);
 const URL = process.env.URL || "http://localhost:5000/api/arduino-data";
 function start() {
-  setInterval(async () => {
-    try {
-      await (await fetch(URL)).json();
-    } catch {}
-  }, INTERVAL).unref();
+	setInterval(async () => {
+		try {
+			await (await fetch(URL)).json();
+		} catch {}
+	}, INTERVAL).unref();
 }
 for (let i = 0; i < N; i++) start();
 ```

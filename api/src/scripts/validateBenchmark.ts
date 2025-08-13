@@ -18,6 +18,11 @@ type Item = {
   ci95Bytes?: number;
   rateStd?: number;
   bytesStd?: number;
+  avgJitterMs?: number;
+  ci95Jitter?: number;
+  avgFreshnessMs?: number;
+  avgStalenessMs?: number;
+  ci95Staleness?: number;
   nUsed?: number;
   nTotal?: number;
   expectedRate?: number;
@@ -130,6 +135,8 @@ async function main() {
   const minSamples = 10; // minimal nUsed for believable mean
   const durationSec = Number(rc.durationSec ?? 0);
   const ciThresh = durationSec >= 60 ? 0.3 : 0.6;
+  const ciThreshJitter = durationSec >= 60 ? 0.35 : 0.7;
+  const ciThreshStale = durationSec >= 60 ? 0.35 : 0.7;
 
   // helpers
   const parseIntSafe = (v: any): number | undefined => {
@@ -181,6 +188,22 @@ async function main() {
           `${s.label}: szeroki CI Bytes/s (±${(rel * 100).toFixed(0)}% średniej)`,
         );
     }
+    // CI dla jitter/staleness
+    if (Number.isFinite(s.avgJitterMs) && Number(s.avgJitterMs) > 0 && Number.isFinite(s.ci95Jitter)) {
+      const rel = (s.ci95Jitter || 0) / (s.avgJitterMs || 1);
+      if (rel > ciThreshJitter)
+        warn.push(
+          `${s.label}: szeroki CI Jitter (±${(rel * 100).toFixed(0)}% średniej)`,
+        );
+    }
+    const staleAvg = Number.isFinite(Number(s.avgStalenessMs)) ? Number(s.avgStalenessMs) : Number(s.avgFreshnessMs);
+    if (Number.isFinite(staleAvg) && staleAvg > 0 && Number.isFinite(s.ci95Staleness)) {
+      const rel = (s.ci95Staleness || 0) / (staleAvg || 1);
+      if (rel > ciThreshStale)
+        warn.push(
+          `${s.label}: szeroki CI Staleness (±${(rel * 100).toFixed(0)}% średniej)`,
+        );
+    }
     // Uwaga: nie wymuszamy bytes ≈ rate × payload, bo payload bywa zmienny (mqtt/arduino), a avgPayload pochodzi z próbek.
     // sanity: if expectedRate is provided, use it; otherwise derive from label and scale by clients
     if (s.tolRate != null) {
@@ -219,6 +242,31 @@ async function main() {
       }
     }
   }
+
+  // Sanity: przy ~1 Hz i bez obciążenia oczekujemy, że jitter WS ≪ HTTP (np. >25% niższy)
+  try {
+    const oneHz = items.filter(s => /@1(?:\.0+)?Hz/.test(s.label));
+    const byKey = new Map<string, { ws?: Item; http?: Item }>();
+    for (const s of oneHz) {
+      const load = (s.label.match(/load=(\d+)%/)?.[1] ?? '0');
+      const clients = s.mode === 'ws' ? String(s.clientsWs ?? s.label.match(/cWs=(\d+)/)?.[1] ?? '0') : String(s.clientsHttp ?? s.label.match(/cHttp=(\d+)/)?.[1] ?? '0');
+      const key = `L${load}|C${clients}`;
+      const g = byKey.get(key) || {};
+      if (s.mode === 'ws') g.ws = s; else g.http = s;
+      byKey.set(key, g);
+    }
+    for (const [k, g] of byKey) {
+      if (!g.ws || !g.http) continue;
+      const jw = Number(g.ws.avgJitterMs ?? NaN);
+      const jh = Number(g.http.avgJitterMs ?? NaN);
+      if (Number.isFinite(jw) && Number.isFinite(jh) && jh > 0) {
+        const rel = (jw - jh) / jh; // ujemny gdy WS mniejszy (lepszy)
+        if (rel > -0.25) {
+          warn.push(`Jitter WS nie wyraźnie mniejszy niż HTTP przy 1Hz (${k}): WS=${jw.toFixed(1)} ms, HTTP=${jh.toFixed(1)} ms`);
+        }
+      }
+    }
+  } catch {}
 
   const status = fail.length ? 'FAIL' : warn.length ? 'WARN' : 'PASS';
   const header = `Credibility/Reliability/Correctness validation`;

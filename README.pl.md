@@ -190,16 +190,14 @@ Po stronie API dostępny jest kompletny mechanizm pomiarów, eksportu i aktualiz
   - `yarn measure` (z katalogu `api/`)
 - Pliki wynikowe jednego uruchomienia:
   - `sessions.csv` — spłaszczone próbki sesji (WS i HTTP)
-  - `summary.json` — podsumowania (średnie, EL delay p99, jitter, staleness)
-  - `by_load.csv`, `by_clients.csv` — uśrednienia wg obciążenia CPU i liczby klientów
-  - `by_clients_normalized.csv` — metryki przeliczone na jednego klienta
+  - `summary.json` — agregaty (średnie, ELU p99, jitter, staleness)
   - `README.md` — podsumowanie z mapowaniem do dashboardu
 - Zaktualizuj dokument badawczy o ostatnie wyniki (sekcja auto w `docs/ASPEKT_BADAWCZY.md`):
   - `yarn docs:research:update` (z katalogu `api/`)
 
 Skróty pomiarowe (z katalogu `api/`):
 
-- `npm run research:quick` — krótka weryfikacja.
+- `npm run research:quick` — krótki sanity check.
 - `npm run research:safe` — bezpieczny (0.5–1 Hz, tick=500 ms).
 - `npm run research:sanity` — stabilny sanity @1 Hz (12 s) z wyłączonym próbkowaniem CPU (`--disablePidusage`).
 - `npm run research:full` — pełny zestaw (Hz: 0.5,1,2; Load: 0,25,50; tick=200 ms).

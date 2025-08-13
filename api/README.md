@@ -213,28 +213,7 @@ Arduino payload shape (per line before enrichment):
 | POST | `/api/monitor/live-emit` | Toggle real‑time emissions: body `{ enabled: boolean }` |
 | GET | `/api/monitor/sessions/export/csv` | Export flattened session metrics as CSV |
 
-CSV columns (sessions.csv — pełny słowniczek):
-
-- sessionId — identyfikator sesji
-- label — etykieta (np. „WS@1Hz payload=360B cWs=10”) używana też w raportach
-- mode — tryb sesji: `ws` lub `polling`
-- startedAt, finishedAt — znaczniki czasu rozpoczęcia i zakończenia sesji
-- sampleIndex — indeks próbki w ramach sesji (1..N)
-- ts — timestamp próbki (ISO)
-- cpu — obciążenie procesu Node [%]
-- rssMB — pamięć robocza procesu [MB]
-- heapUsedMB — zużycie sterty [MB]
-- elu — Event Loop Utilization (0..1)
-- elDelayP99Ms — opóźnienie pętli zdarzeń (p99) [ms]
-- httpReqRate, wsMsgRate — częstość żądań/wiadomości [/s]
-- httpBytesRate, wsBytesRate — przepustowość [B/s]
-- httpAvgBytesPerReq, wsAvgBytesPerMsg — średni ładunek [B]
-- httpJitterMs, wsJitterMs — odchylenie standardowe odstępów [ms]
-- tickMs — realny odstęp między próbkami (monitor tick) [ms]
-- dataFreshnessMs — staleness: wiek danych (ms od ostatniego odczytu Arduino)
-- sourceTsMs — źródłowy timestamp z urządzenia (ms) jeśli dostępny
-- ingestTsMs — czas przyjęcia danych przez backend (ms)
-- emitTsMs — czas emisji do klienta (ms)
+CSV columns (excerpt): `timestamp, sessionId, mode, httpReqRate, wsMsgRate, bytesPerSec, cpu, rss, elu, evLoopDelayP99, jitterMs, freshnessMs, wsClients`.
 
 ### WebSockets Events
 
@@ -247,7 +226,7 @@ CSV columns (sessions.csv — pełny słowniczek):
 
 ## Monitoring & Sessions
 
-`ResourceMonitorService` summary metrics:
+`ResourceMonitorService` aggregates:
 
 - CPU (% process) via `pidusage`.
 - Memory (RSS, heap segments, external, ArrayBuffers).
@@ -352,7 +331,7 @@ This project includes a simple but reproducible measurement pipeline to compare 
   - Stable sanity (WS+HTTP @1 Hz, pidusage disabled): `npm run research:sanity`
   - Solid full run: `npm run research:full` (WS/HTTP; Hz: 0.5,1,2; load: 0,25,50; 30 s; warmup/cooldown 2 s; 2 repeats; tick 200 ms). After it finishes:
     - the research doc auto‑updates (`docs/ASPEKT_BADAWCZY.md`)
-  - consolidated summary metrics are written to `benchmarks/_aggregate.csv`/`_aggregate.json` and `benchmarks/combined.csv`
+    - consolidated aggregates are written to `benchmarks/_aggregate.csv`/`_aggregate.json` and `benchmarks/combined.csv`
 - Artifacts per run:
   - `sessions.csv` — flattened per‑second samples for both modes
   - `summary.json` — aggregated metrics (avg rates, bytes/unit, EL delay p99, jitter, freshness)

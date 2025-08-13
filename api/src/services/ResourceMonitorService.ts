@@ -236,7 +236,8 @@ class ResourceMonitorService {
       const sampleMs = Number(
         process.env.MONITOR_CPU_SAMPLE_MS || process.env.CPU_SAMPLE_MS || 1000,
       );
-      if (Number.isFinite(sampleMs) && sampleMs > 0) this.cpuSampleEveryMs = sampleMs;
+      if (Number.isFinite(sampleMs) && sampleMs > 0)
+        this.cpuSampleEveryMs = sampleMs;
     } catch {}
 
     if (!this.tickInterval) {
@@ -574,7 +575,8 @@ class ResourceMonitorService {
     // pidusage can be expensive on Windows; throttle or disable if requested
     let usageCpu = this.cachedCpuPct;
     let usageMem = this.cachedRssBytes;
-    const needSample = nowWall - this.lastPidSampleAtMs >= this.cpuSampleEveryMs;
+    const needSample =
+      nowWall - this.lastPidSampleAtMs >= this.cpuSampleEveryMs;
     if (!this.pidDisabled && needSample) {
       try {
         const u = await pidusage(process.pid);
@@ -742,10 +744,17 @@ class ResourceMonitorService {
   }
 
   /** Starts synthetic in-process HTTP ticks to simulate polling clients deterministically. */
-  private startSyntheticHttp(intervalMs: number, count: number = 1, payloadBytes?: number) {
+  private startSyntheticHttp(
+    intervalMs: number,
+    count: number = 1,
+    payloadBytes?: number,
+  ) {
     this.stopSyntheticHttp();
     const every = Math.max(50, intervalMs);
-    const bytes = Math.max(1, Math.floor(payloadBytes || this.lastArduinoPayloadBytes));
+    const bytes = Math.max(
+      1,
+      Math.floor(payloadBytes || this.lastArduinoPayloadBytes),
+    );
     const doOnce = () => {
       try {
         this.onHttpResponse(bytes);
