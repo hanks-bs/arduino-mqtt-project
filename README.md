@@ -193,9 +193,11 @@ Sesje pomiarowe zapisują próbki metryk i mogą opcjonalnie uruchamiać determi
 Po stronie API zaimplementowano kompletny mechanizm do przeprowadzania pomiarów, eksportu wyników i automatycznej aktualizacji dokumentacji badawczej.
 
 - **Uruchomienie pełnego zestawu pomiarów** (pliki wynikowe są zapisywane w `api/benchmarks/<timestamp>/`):
+
   - Z katalogu `api/` wykonaj: `yarn measure`
 
 - **Pliki wynikowe pojedynczego uruchomienia:**
+
   - `sessions.csv` — spłaszczone próbki z sesji pomiarowych (dla WS i HTTP).
   - `summary.json` — statystyki zbiorcze (średnie, ELU p99, jitter, staleness).
   - `README.md` — podsumowanie wyników z mapowaniem na wskaźniki w dashboardzie.
@@ -221,6 +223,7 @@ Po stronie API zaimplementowano kompletny mechanizm do przeprowadzania pomiarów
 - Flagi takie jak `--disablePidusage` (wyłącza próbnik CPU) oraz `--cpuSampleMs=1000` (zmniejsza częstotliwość próbkowania) pozwalają zredukować narzut samego mechanizmu monitorującego.
 
 ---
+
 ---
 
 ## Licencja i wkład

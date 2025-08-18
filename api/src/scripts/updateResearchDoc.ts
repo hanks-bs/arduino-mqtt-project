@@ -71,6 +71,11 @@ async function main() {
 
   const summary = await fs.readJSON(summaryPath);
   const itemsRaw = (summary.summaries || []) as Array<any>;
+  const runConfigsMulti: any[] = Array.isArray(summary.runConfigs)
+    ? summary.runConfigs
+    : summary.runConfig
+      ? [summary.runConfig]
+      : [];
   // Sort items: mode (ws first), then Hz (from label), then loadCpuPct, then clients
   const parseHz = (label: string): number => {
     const m = label?.match(/@(\d+(?:\.\d+)?)Hz/);
@@ -220,6 +225,16 @@ async function main() {
     .join('\n');
 
   const statusBar = `Status: fair payload: ${fairPayload ? 'TAK' : 'NIE'}, source-limited: ${sourceLimited ? 'TAK' : 'NIE'}, czas: ${runCfg?.durationSec ?? '—'}s, tick: ${runCfg?.monitorTickMs ?? '—'} ms, repeats: ${runCfg?.repeats ?? '—'}`;
+  const phasesInfo =
+    runConfigsMulti.length > 1
+      ? '\nFazy (chronologicznie):\n' +
+        runConfigsMulti
+          .map(
+            (c, i) =>
+              `  ${i + 1}. ${c.phase || '(brak etykiety)'} Hz=[${(c.hzSet || []).join(',')}] Load=[${(c.loadSet || []).join(',')}] clientsWs=${c.clientsWs} clientsHttp=${c.clientsHttp} dur=${c.durationSec}s`,
+          )
+          .join('\n')
+      : '';
   const sourceNote = sourceLimited
     ? '\nUwaga: Etykiety @Hz odnoszą się do tempa transportu, ale run ograniczony przez źródło; różnice WS vs HTTP w Rate nie są miarodajne.'
     : '';
@@ -229,6 +244,7 @@ async function main() {
   const block = `Ostatni run: ${latest}
 
 ${statusBar}
+${phasesInfo}
 
 Pliki: [sessions.csv](../api/benchmarks/${latest}/sessions.csv), [summary.json](../api/benchmarks/${latest}/summary.json), [README](../api/benchmarks/${latest}/README.md)
 

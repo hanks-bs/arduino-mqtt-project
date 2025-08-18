@@ -189,9 +189,11 @@ Measurement sessions record samples of these metrics and can optionally run dete
 The API side implements a complete mechanism for conducting measurements, exporting results, and automatically updating the research documentation.
 
 - **Run the full measurement suite** (output files are saved in `api/benchmarks/<timestamp>/`):
+
   - From the `api/` directory, run: `yarn measure`
 
 - **Output files from a single run:**
+
   - `sessions.csv` — Flattened samples from measurement sessions (for WS and HTTP).
   - `summary.json` — Aggregate statistics (averages, ELU p99, jitter, staleness).
   - `README.md` — A summary of the results with a mapping to the dashboard indicators.
@@ -217,6 +219,7 @@ The API side implements a complete mechanism for conducting measurements, export
 - Flags like `--disablePidusage` (disables the CPU sampler) and `--cpuSampleMs=1000` (reduces the sampling frequency) help minimize the overhead of the monitoring mechanism itself.
 
 ---
+
 ---
 
 ## License and Contributions

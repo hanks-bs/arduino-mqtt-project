@@ -960,6 +960,7 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
     exportCsv(sessions, csvPath);
   }
   const runConfig = {
+    phase: (process.env as any).MEASURE_PHASE || undefined,
     modes: MODES,
     hzSet: HZ_SET,
     loadSet: loadLevels,
@@ -976,11 +977,19 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
   };
   // Merge summary.json if exists
   let combinedEvaluated = evaluated as any[];
+  let runConfigs: any[] = [runConfig];
   if (await fs.pathExists(summaryPath)) {
     try {
       const prev = await fs.readJSON(summaryPath);
       if (Array.isArray(prev?.summaries)) {
         combinedEvaluated = [...prev.summaries, ...evaluated];
+      }
+      // Zbieraj historię konfiguracji, aby móc odtworzyć fazy wielo-runowe
+      if (Array.isArray(prev?.runConfigs) && prev.runConfigs.length) {
+        runConfigs = [...prev.runConfigs, runConfig];
+      } else if (prev?.runConfig) {
+        // Zachowaj poprzednie pojedyncze runConfig jako pierwszą fazę
+        runConfigs = [prev.runConfig, runConfig];
       }
     } catch {}
   }
@@ -994,6 +1003,7 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
       byClients: combinedByClients,
       flags,
       runConfig,
+      runConfigs,
       units: {
         rate: '/s',
         bytesRate: 'B/s',
