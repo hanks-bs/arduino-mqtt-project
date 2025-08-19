@@ -48,15 +48,17 @@ describe('ResourceMonitorService integration - HTTP simulated', () => {
       }, period);
       timer.unref();
 
-      await new Promise(res => setTimeout(res, durationMs + 600));
-      clearInterval(timer);
+      // Wait a bit for the traffic to start
+      await new Promise(res => setTimeout(res, 1000));
 
-      // Sample a few metrics to build average
+      // Sample a few metrics WHILE traffic is happening
       const samples = [] as any[];
       for (let i = 0; i < 5; i++) {
         samples.push(await ResourceMonitor.sampleNow());
         await new Promise(res => setTimeout(res, 250));
       }
+      
+      clearInterval(timer);
 
       const avgRate =
         samples.reduce((a, m) => a + m.httpReqRate, 0) / samples.length;
