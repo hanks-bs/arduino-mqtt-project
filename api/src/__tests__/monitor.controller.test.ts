@@ -9,11 +9,7 @@ jest.mock('../services/ResourceMonitorService', () => {
       sampleNow: jest.fn(async () => ({ ok: true })),
       isLiveEmitEnabled: jest.fn(() => true),
       setLiveEmitEnabled: jest.fn(),
-      startSession: jest.fn((cfg: any) => ({ id: '1', config: cfg })),
-      finishSession: jest.fn((id: string) => (id === '1' ? { id } : undefined)),
-      resetSessions: jest.fn(() => 3),
-      getSession: jest.fn((id: string) => (id === '1' ? { id } : undefined)),
-      listSessions: jest.fn(() => [{ id: '1' }]),
+      // session APIs usunięte z kontrolera – mock pozostawiony pusty
     },
   };
 });
@@ -55,47 +51,5 @@ describe('MonitorController routes', () => {
     expect(ok.body.success).toBe(true);
   });
 
-  it('POST /api/monitor/start requires label and mode', async () => {
-    const bad = await request(server).post('/api/monitor/start').send({});
-    expect(bad.status).toBe(400);
-
-    const ok = await request(server)
-      .post('/api/monitor/start')
-      .send({ label: 'x', mode: 'ws' });
-    expect(ok.status).toBe(201);
-    expect(ok.body.data.id).toBe('1');
-  });
-
-  it('POST /api/monitor/stop validates id and 404 on missing', async () => {
-    const bad = await request(server).post('/api/monitor/stop').send({});
-    expect(bad.status).toBe(400);
-
-    const nf = await request(server)
-      .post('/api/monitor/stop')
-      .send({ id: 'nope' });
-    expect(nf.status).toBe(404);
-
-    const ok = await request(server)
-      .post('/api/monitor/stop')
-      .send({ id: '1' });
-    expect(ok.status).toBe(200);
-  });
-
-  it('GET /api/monitor/sessions and /:id work', async () => {
-    const list = await request(server).get('/api/monitor/sessions');
-    expect(list.status).toBe(200);
-    expect(Array.isArray(list.body.data)).toBe(true);
-
-    const one = await request(server).get('/api/monitor/sessions/1');
-    expect(one.status).toBe(200);
-
-    const nf = await request(server).get('/api/monitor/sessions/2');
-    expect(nf.status).toBe(404);
-  });
-
-  it('POST /api/monitor/reset clears sessions', async () => {
-    const res = await request(server).post('/api/monitor/reset');
-    expect(res.status).toBe(200);
-    expect(res.body.data.cleared).toBe(3);
-  });
+  // Usunięto testy endpointów sesyjnych (start/stop/list/reset)
 });

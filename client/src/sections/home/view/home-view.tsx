@@ -2,6 +2,7 @@
 
 import type { ArduinoDataPayload } from "@/types";
 import {
+	useSocketIOActivation,
 	useSocketIOEvent,
 	useSocketIOStatus,
 } from "@/websocket/providers/websocket-provider";
@@ -14,10 +15,9 @@ import LiveEmitToggle from "../components/live-emit-toggle";
 import LiveKpis from "../components/live-kpis";
 import ModeSelector from "../components/mode-selector";
 import RefreshSettings from "../components/refresh-settings";
-import CurrentResults from "../current-results";
 import ResearchGuide from "../research-guide";
+import ResearchRunPanel from "../research-run-panel";
 import ResourceMonitor from "../resource-monitor";
-import SessionPanel from "../session-panel";
 import ThesisInfo from "../thesis-info";
 
 /**
@@ -32,6 +32,7 @@ export function HomeView() {
 
 	// Socket.IO
 	const isSocketConnected = useSocketIOStatus();
+	const { setActive: setWsActive } = useSocketIOActivation();
 	const socketPayload = useSocketIOEvent<ArduinoDataPayload>("arduinoData");
 
 	// tryb pobierania: 'ws' lub 'polling'
@@ -43,6 +44,13 @@ export function HomeView() {
 	const [intervalSec, setIntervalSec] = useState(3);
 	const [auto, setAuto] = useState(true);
 	const pollingRef = useRef<number | null>(null);
+	// sygnał do wymuszenia snapshotu metryk (inkrementacja powoduje fetch w ResourceMonitor)
+	const [metricsRefreshToken, setMetricsRefreshToken] = useState(0);
+
+	// przełącz aktywność WS zależnie od trybu
+	useEffect(() => {
+		setWsActive(mode === "ws");
+	}, [mode, setWsActive]);
 
 	// aktualizacja payload z WS
 	useEffect(() => {
@@ -70,6 +78,9 @@ export function HomeView() {
 					}
 				} catch (e) {
 					console.error("Polling error:", e);
+				} finally {
+					// po każdej próbie (udanej lub nie) sygnalizuj refresh metryk
+					setMetricsRefreshToken(t => t + 1);
 				}
 			};
 			fetchData();
@@ -95,6 +106,9 @@ export function HomeView() {
 			}
 		} catch (e) {
 			console.error("Manual refresh error:", e);
+		} finally {
+			// wymuś snapshot metryk (polling)
+			setMetricsRefreshToken(t => t + 1);
 		}
 	};
 
@@ -123,9 +137,6 @@ export function HomeView() {
 			{payload?.lastMeasurement && Array.isArray(payload.history) && (
 				<LiveKpis payload={payload} />
 			)}
-			{payload?.lastMeasurement && (
-				<CurrentResults last={payload.lastMeasurement} />
-			)}
 			{payload?.lastMeasurement && Array.isArray(payload.history) ? (
 				<ChartSection payload={payload} />
 			) : (
@@ -140,8 +151,15 @@ export function HomeView() {
 					</Paper>
 				</Stack>
 			)}
-			{payload && <ResourceMonitor />}
-			<SessionPanel />
+			{payload && (
+				<ResourceMonitor
+					mode={mode}
+					metricsIntervalSec={intervalSec}
+					refreshSignal={metricsRefreshToken}
+				/>
+			)}
+			{/* Panel uruchamiania zautomatyzowanych runów badawczych */}
+			<ResearchRunPanel />
 		</Stack>
 	);
 }

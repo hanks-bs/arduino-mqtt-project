@@ -56,6 +56,7 @@ export interface LiveMetrics {
 
   loadAvg1: number; // OS 1-min load
   uptimeSec: number; // process uptime
+  handles: number; // liczba aktywnych uchwytów (przybliżenie aktywnych połączeń/FD)
 }
 
 export interface SessionConfig {
@@ -89,6 +90,8 @@ export interface SessionConfig {
   internalHttpDriver?: boolean;
   /** Optional: reset cumulative counters at session start (for clean totals). */
   resetCounters?: boolean;
+  /** Podczas kontrolowanej sesji WS zliczaj tylko komunikaty drivera (ignoruj zewnętrzne). */
+  isolateControlledWs?: boolean;
 }
 
 export interface SessionRecord {
@@ -138,6 +141,8 @@ class ResourceMonitorService {
   private totalWsMessages = 0;
   private totalHttpBytes = 0;
   private totalWsBytes = 0;
+  // surowe bajty pojedynczych emisji WS (bez mnożenia przez liczbę klientów) – do poprawnego avg payload
+  private totalWsPayloadBytesRaw = 0;
 
   // rolling for per-second rates
   private lastTickAt = Date.now();
@@ -147,6 +152,7 @@ class ResourceMonitorService {
   private lastWsMessages = 0;
   private lastHttpBytes = 0;
   private lastWsBytes = 0;
+  private lastWsPayloadBytesRaw = 0;
 
   // inter-arrival intervals (ms) used to compute jitter
   private wsIntervals: number[] = [];
@@ -183,6 +189,7 @@ class ResourceMonitorService {
   private wsDriverTimer: NodeJS.Timeout | null = null;
   private isWsControlled: boolean = false;
   private lastArduinoPayloadBytes: number = 400; // updated by noteArduinoPayloadSize
+  private isolateControlledWs: boolean = false; // izolacja kontrolowanych emisji
 
   // internal HTTP polling driver for measurement sessions
   private selfPollTimer: NodeJS.Timeout | null = null;
@@ -310,12 +317,18 @@ class ResourceMonitorService {
    * Records that a WS payload with given size (bytes) was emitted.
    * Call this where you emit 'arduinoData'.
    */
-  onWsEmit(bytes: number) {
+  onWsEmit(bytes: number, source: 'external' | 'controlled' = 'external') {
+    if (
+      source === 'external' &&
+      this.isolateControlledWs &&
+      this.isWsControlled
+    )
+      return; // ignoruj przy izolacji
     this.totalWsMessages += 1;
-    // Przepływność WS skalujemy przez liczbę podłączonych klientów (broadcast)
     const clients = this.io ? this.io.of('/').sockets.size : 0;
     const scale = Math.max(1, clients);
-    this.totalWsBytes += bytes * scale;
+    this.totalWsBytes += bytes * scale; // egress
+    this.totalWsPayloadBytesRaw += bytes; // raw payload
     const now = Date.now();
     this.lastEmitAtMs = now;
     if (this.lastWsMessageAt) {
@@ -398,7 +411,9 @@ class ResourceMonitorService {
       this.totalWsMessages = 0;
       this.totalHttpBytes = 0;
       this.totalWsBytes = 0;
+      this.totalWsPayloadBytesRaw = 0;
     }
+    this.isolateControlledWs = !!config.isolateControlledWs;
     // Reset rolling/windows state to avoid contamination from previous sessions (align baselines)
     this.resetRollingState();
 
@@ -435,13 +450,14 @@ class ResourceMonitorService {
     } else {
       this.stopSelfPolling(); // ensure it's off
       this.stopSyntheticHttp();
-      // ensure WS emissions are enabled during a WS session
-      if (this.prevLiveEmitBeforeSession === null) {
-        this.prevLiveEmitBeforeSession = this.liveEmitEnabled;
+      // jeśli izolujemy kontrolowany driver, nie wymuszamy globalnych emisji 'arduinoData'
+      if (!cfg.isolateControlledWs) {
+        if (this.prevLiveEmitBeforeSession === null) {
+          this.prevLiveEmitBeforeSession = this.liveEmitEnabled;
+        }
+        this.forcedEmitForSession = !this.liveEmitEnabled;
+        if (this.forcedEmitForSession) this.setLiveEmitEnabled(true);
       }
-      // mark if we actually force-enable (so we know whether to restore later)
-      this.forcedEmitForSession = !this.liveEmitEnabled;
-      if (this.forcedEmitForSession) this.setLiveEmitEnabled(true);
       // optional controlled WS driver at fixed rate
       const hz =
         cfg.wsFixedRateHz && cfg.wsFixedRateHz > 0 ? cfg.wsFixedRateHz : 0;
@@ -625,6 +641,8 @@ class ResourceMonitorService {
     const wsMsgDelta = this.totalWsMessages - this.lastWsMessages;
     const httpBytesDelta = this.totalHttpBytes - this.lastHttpBytes;
     const wsBytesDelta = this.totalWsBytes - this.lastWsBytes;
+    const wsPayloadBytesRawDelta =
+      this.totalWsPayloadBytesRaw - this.lastWsPayloadBytesRaw;
 
     const httpReqRate = httpReqDelta / dtSec;
     const wsMsgRate = wsMsgDelta / dtSec;
@@ -633,7 +651,9 @@ class ResourceMonitorService {
 
     const httpAvgBytesPerReq =
       httpReqDelta > 0 ? httpBytesDelta / httpReqDelta : 0;
-    const wsAvgBytesPerMsg = wsMsgDelta > 0 ? wsBytesDelta / wsMsgDelta : 0;
+    // Uwaga: wsAvgBytesPerMsg oparte na surowym rozmiarze pojedynczej wiadomości (bez mnożenia przez klientów)
+    const wsAvgBytesPerMsg =
+      wsMsgDelta > 0 ? wsPayloadBytesRawDelta / wsMsgDelta : 0;
 
     const httpJitterMs = this.stdDev(this.httpIntervals);
     const wsJitterMs = this.stdDev(this.wsIntervals);
@@ -650,6 +670,7 @@ class ResourceMonitorService {
     this.lastWsMessages = this.totalWsMessages;
     this.lastHttpBytes = this.totalHttpBytes;
     this.lastWsBytes = this.totalWsBytes;
+    this.lastWsPayloadBytesRaw = this.totalWsPayloadBytesRaw;
 
     return {
       ts: new Date().toISOString(),
@@ -689,6 +710,7 @@ class ResourceMonitorService {
 
       loadAvg1: os.loadavg()[0] ?? 0,
       uptimeSec: process.uptime(),
+      handles: (process as any)._getActiveHandles?.().length || 0,
     };
   }
 
@@ -822,7 +844,8 @@ class ResourceMonitorService {
         setTimeout(() => {
           const payload = 'x'.repeat(payloadBytes);
           if (this.liveEmitEnabled) this.io?.emit('arduinoData', payload);
-          this.onWsEmit(payloadBytes);
+          // WAŻNE: oznacz emisję jako 'controlled', aby nie została odfiltrowana gdy isolateControlledWs=true
+          this.onWsEmit(payloadBytes, 'controlled');
         }, e2eEmitDelayMs);
       } catch {}
     };

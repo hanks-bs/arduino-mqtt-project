@@ -37,34 +37,5 @@ export interface LiveMetrics {
 	uptimeSec: number;
 }
 
-export interface SessionConfig {
-	label: string;
-	mode: "ws" | "polling";
-	pollingIntervalMs?: number;
-	sampleCount?: number;
-	durationSec?: number;
-	/** Pomijaj pierwsze N sekund (stabilizacja) */
-	warmupSec?: number;
-	/** Pomijaj ostatnie N sekund (cooldown) */
-	cooldownSec?: number;
-	/** Dla WS: kontrolowany driver z ustaloną częstotliwością (Hz) */
-	wsFixedRateHz?: number;
-	/** Założony rozmiar payloadu w bajtach (gdy brak realnego) */
-	assumedPayloadBytes?: number;
-	/** Opcjonalne: procentowe obciążenie CPU w trakcie sesji (0..100) */
-	loadCpuPct?: number;
-	/** Opcjonalne: liczba wątków obciążenia CPU */
-	loadWorkers?: number;
-	/** Opcjonalne: liczba syntetycznych klientów HTTP (wewnętrznych) */
-	clientsHttp?: number;
-	/** Opcjonalne: liczba syntetycznych klientów WebSocket (wewnętrznych) */
-	clientsWs?: number;
-}
-
-export interface SessionRecord {
-	id: string;
-	config: SessionConfig;
-	startedAt: string;
-	finishedAt?: string;
-	samples: LiveMetrics[];
-}
+// Typy Session* zostały usunięte z klienta – logika sesji jest teraz
+// zarządzana wyłącznie po stronie API / narzędzi badawczych.

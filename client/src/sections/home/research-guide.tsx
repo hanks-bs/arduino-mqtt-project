@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert, Box, List, ListItem, Typography } from "@mui/material";
+import { Alert, Box, Divider, List, ListItem, Typography } from "@mui/material";
 
 export default function ResearchGuide() {
 	return (
@@ -12,44 +12,92 @@ export default function ResearchGuide() {
 				bgcolor: "background.paper",
 			}}>
 			<Typography variant='h6' gutterBottom>
-				Przewodnik aspektu badawczego
+				Przewodnik badań (dashboard)
+			</Typography>
+			<Typography variant='subtitle2' gutterBottom>
+				Co przedstawia ten klient?
 			</Typography>
 			<Typography variant='body2' paragraph>
-				Ten moduł pozwala porównać efektywność <strong>WebSocket (push)</strong>{" "}
-				oraz <strong>HTTP Polling</strong> w kontekście zużycia zasobów i
-				opóźnień. Postępuj zgodnie z krokami poniżej, aby uzyskać powtarzalne
-				wyniki i móc wyciągnąć wnioski do części badawczej pracy magisterskiej.
+				Dashboard wizualizuje w czasie rzeczywistym strumień danych z Arduino
+				(ostatnie pomiary) oraz kluczowe metryki infrastrukturalne po stronie
+				API:
+				<strong> CPU% </strong>, <strong>pamięć (RSS)</strong>,
+				<strong> ELU / opóźnienie pętli zdarzeń</strong>,
+				<strong> tempo zdarzeń (Rate)</strong>, <strong>przepływ bajtów</strong>
+				,<strong> wielkość ładunku</strong>, <strong>jitter</strong> i
+				<strong> staleness (wiek danych)</strong>. Służy jako narzędzie
+				obserwacyjne do jakościowej (na żywo) i wstępnej ilościowej oceny różnic
+				między strategią <em>push (WebSocket)</em> oraz{" "}
+				<em>pull (HTTP Polling)</em>.
 			</Typography>
-			<List dense>
+			<Typography variant='subtitle2' gutterBottom>
+				Metryki (skrót):
+			</Typography>
+			<List dense sx={{ pl: 3 }}>
+				<ListItem>CPU% / RSS – koszt zasobów procesu API.</ListItem>
 				<ListItem>
-					<strong>Krok 1.</strong>&nbsp;Ustal stabilne źródło danych (Arduino
-					generuje podobne wielkości) – unikaj gwałtownych zmian.
+					ELU / p99 loop delay – presja na pętlę zdarzeń (responsywność).
+				</ListItem>
+				<ListItem>Rate (msg/s lub req/s) – tempo dostarczania danych.</ListItem>
+				<ListItem>
+					Bytes/s & Payload – narzut transferu i średni rozmiar ładunku.
 				</ListItem>
 				<ListItem>
-					<strong>Krok 2.</strong>&nbsp;Wybierz tryb odbioru (WebSocket lub
-					Polling) – sekcja „Tryb danych”. Dla Polling ustaw interwał.
+					Jitter – stabilność odstępów między kolejnymi danymi.
 				</ListItem>
 				<ListItem>
-					<strong>Krok 3.</strong>&nbsp;W sekcji „Sesje pomiarowe” skonfiguruj
-					parametry (liczba próbek lub czas trwania) i uruchom sesję – prowadź
-					testy <em>sekwencyjnie</em>.
-				</ListItem>
-				<ListItem>
-					<strong>Krok 4.</strong>&nbsp;Po zakończeniu sesji dodaj test dla
-					drugiego trybu z identycznymi parametrami częstotliwości.
-				</ListItem>
-				<ListItem>
-					<strong>Krok 5.</strong>&nbsp;Zaznacz sesje do porównania – pojawi się
-					tabela statystyk i wskaźników pochodnych.
-				</ListItem>
-				<ListItem>
-					<strong>Krok 6.</strong>&nbsp;Wyeksportuj dane (JSON) do dalszej
-					analizy (Python / R).
+					Staleness – świeżość danych (opóźnienie źródło → UI).
 				</ListItem>
 			</List>
+			<Divider sx={{ my: 2 }} />
+			<Typography variant='subtitle2' gutterBottom>
+				Jak przeprowadzić badanie (skrót do pracy magisterskiej)
+			</Typography>
+			<List dense sx={{ pl: 3 }}>
+				<ListItem>
+					<strong>1. Warunki bazowe:</strong>&nbsp;Ustabilizuj źródło danych
+					(Arduino / generator); zamknij inne obciążające procesy.
+				</ListItem>
+				<ListItem>
+					<strong>2. Tryb:</strong>&nbsp;Wybierz WebSocket lub Polling (ustaw
+					interwał). Odczekaj kilka sekund aż metryki się ustabilizują.
+				</ListItem>
+				<ListItem>
+					<strong>3. Obserwacja:</strong>&nbsp;Odczytaj średnie / typowe
+					wartości CPU, Rate, Bytes/s, Jitter, Staleness. Zanotuj (arkusz /
+					notatki).
+				</ListItem>
+				<ListItem>
+					<strong>4. Zmiana strategii:</strong>&nbsp;Przełącz na drugi tryb
+					(push ↔ pull) zachowując porównywalny Rate (Hz lub interwał) i powtórz
+					notatki.
+				</ListItem>
+				<ListItem>
+					<strong>5. Wariacje:</strong>&nbsp;Powtórz dla innego interwału
+					(niższy ms w Polling lub zmieniona częstotliwość ws drivera) oraz –
+					jeśli chcesz – z obciążeniem CPU (skrypt po stronie API) albo większą
+					liczbą klientów (symulacja po stronie API).
+				</ListItem>
+				<ListItem>
+					<strong>6. Wnioski:</strong>&nbsp;Porównaj pary wyników (WS vs HTTP)
+					pod kątem: staleness (niżej lepiej), jitter (niżej), CPU/Bytes/s
+					(niżej), Rate/świeżość (wyżej / szybciej) – zidentyfikuj przewagi i
+					kompromisy.
+				</ListItem>
+			</List>
+			<Typography variant='body2' paragraph sx={{ mt: 1 }}>
+				Pełne, zautomatyzowane przebiegi (macierze scenariuszy, powtórzenia,
+				CI95) uruchamiane są skryptami w warstwie API (patrz dokument
+				<code>docs/ASPEKT_BADAWCZY.md</code>). Ten panel służy do szybkiej,
+				wizualnej inspekcji i ręcznego pozyskiwania przykładowych punktów
+				danych.
+			</Typography>
 			<Alert severity='info' sx={{ mt: 2 }}>
-				Rekomendacja: przed serią pomiarów zresetuj sesje i zadbaj o brak innych
-				obciążających procesów systemowych.
+				Automatyczne runy (presety i konfiguracja własna) możesz teraz
+				uruchamiać bezpośrednio z panelu poniżej (
+				<strong>Automatyczne runy badawcze</strong>). Wyniki i logi generowane
+				są po stronie API (patrz katalog <code>api/benchmarks</code>). Szczegóły
+				scenariuszy i metodologii: <code>docs/ASPEKT_BADAWCZY.md</code>.
 			</Alert>
 		</Box>
 	);

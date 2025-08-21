@@ -55,6 +55,7 @@ async function runWsControlled(cfg: RunCfg): Promise<SessionRecord> {
     // zapisz liczbę klientów WS do konfiguracji sesji (używane w agregacjach)
     clientsWs: Math.max(0, Math.floor(cfg.clientsWs ?? 0)) || undefined,
     resetCounters: true,
+    isolateControlledWs: true,
   });
   // Wait for the duration + small buffer to ensure final tick
   await sleep(durationSec * 1000 + 600);
@@ -180,9 +181,28 @@ function summarizeSession(s: SessionRecord) {
   const totalBytesApprox = sum.bytesTime; // bytesRate [B/s] * dt [s] => bajty
   const avgRate = totalMsgsApprox / dtSum;
   const avgBytesRate = totalBytesApprox / dtSum;
-  const avgPayload =
-    totalMsgsApprox > 0 ? totalBytesApprox / totalMsgsApprox : 0;
-  const bytesPerUnit = avgPayload || avgBytesRate / Math.max(0.0001, avgRate);
+  // Dla WS totalBytesApprox reprezentuje egress (payload * liczba klientów), więc payload = bytesRate / (rate * clientsWs) gdy klienci>0
+  let avgPayload = 0;
+  if (s.config.mode === 'polling') {
+    avgPayload = totalMsgsApprox > 0 ? totalBytesApprox / totalMsgsApprox : 0;
+  } else {
+    const clientsWs = Math.max(0, Math.floor(s.config.clientsWs ?? 0));
+    if (clientsWs > 0 && avgRate > 0) {
+      avgPayload = avgBytesRate / (avgRate * clientsWs);
+    } else if (avgRate > 0) {
+      // fallback kiedy brak klientów – próbujemy odzyskać z per‑sample wsAvgBytesPerMsg jeśli istnieje
+      try {
+        const perSample = samples
+          .map(m => m.wsAvgBytesPerMsg)
+          .filter(v => Number.isFinite(v) && v > 0);
+        if (perSample.length) {
+          avgPayload = perSample.reduce((a, b) => a + b, 0) / perSample.length;
+        }
+      } catch {}
+    }
+  }
+  const bytesPerUnit =
+    avgPayload || (avgRate > 0 ? avgBytesRate / Math.max(0.0001, avgRate) : 0);
   // Statistical measures (metrology)
   const rateSeries = samples.map(m =>
     s.config.mode === 'polling' ? m.httpReqRate : m.wsMsgRate,
@@ -714,7 +734,24 @@ type MeasureOpts = {
   pair?: boolean; // pair WS/HTTP scenarios for the same parameters
 };
 
-export async function runMeasurements(opts: MeasureOpts = {}) {
+export type RunProgress = {
+  totalSessions: number;
+  completedSessions: number; // zakończone (wliczając bieżącą ukończoną repkę)
+  currentLabel?: string; // label scenariusza w trakcie (gdy raportowany przed startem repki)
+  scenarioIndex?: number; // 1-based indeks scenariusza (bez powtórzeń)
+  scenarioTotal?: number; // liczba scenariuszy (runs.length)
+  repIndex?: number; // 1..repeats
+  repTotal?: number;
+  aborting?: boolean;
+};
+
+export async function runMeasurements(
+  opts: MeasureOpts = {},
+  control?: {
+    onProgress?: (p: RunProgress) => void;
+    shouldAbort?: () => boolean;
+  },
+) {
   // Apply tick override before init
   if (opts.tickMs && Number.isFinite(opts.tickMs)) {
     (process.env as any).MONITOR_TICK_MS = String(opts.tickMs);
@@ -889,9 +926,30 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
     1,
     Number(opts.repeats ?? process.env.MEASURE_REPEATS ?? '1'),
   );
+  const scenarioTotal = runs.length;
+  const totalSessions = scenarioTotal * repeats;
+  let completedSessions = 0;
+  let scenarioIdx = 0;
   for (const r of runs) {
+    scenarioIdx += 1;
+    if (control?.onProgress) {
+      control.onProgress({
+        totalSessions,
+        completedSessions,
+        currentLabel: r.label,
+        scenarioIndex: scenarioIdx,
+        scenarioTotal,
+        repIndex: 0,
+        repTotal: repeats,
+        aborting: control.shouldAbort?.() || false,
+      });
+    }
     console.log(`[Measure] Starting ${r.label} ...`);
     for (let i = 0; i < repeats; i++) {
+      if (control?.shouldAbort?.()) {
+        console.warn('[Measure] Abort requested before repetition start');
+        break;
+      }
       const sess =
         r.mode === 'ws' ? await runWsControlled(r) : await runHttpSimulated(r);
       console.log(
@@ -901,7 +959,28 @@ export async function runMeasurements(opts: MeasureOpts = {}) {
       (sess as any).repIndex = i + 1;
       (sess as any).repTotal = repeats;
       sessions.push(sess);
+      completedSessions += 1;
+      if (control?.onProgress) {
+        control.onProgress({
+          totalSessions,
+          completedSessions,
+          currentLabel: r.label,
+          scenarioIndex: scenarioIdx,
+          scenarioTotal,
+          repIndex: i + 1,
+          repTotal: repeats,
+          aborting: control.shouldAbort?.() || false,
+        });
+      }
       await sleep(300); // small separation between reps
+      if (control?.shouldAbort?.()) {
+        console.warn('[Measure] Abort requested after repetition');
+        break;
+      }
+    }
+    if (control?.shouldAbort?.()) {
+      console.warn('[Measure] Abort requested – stopping scenarios loop');
+      break;
     }
     await sleep(500); // separation between scenarios
   }
@@ -1505,30 +1584,30 @@ Niepewność średnich (95% CI) dla kluczowych wielkości na sesję. Tick próbk
 
 | Label | n (used/total) | Rate [/s] | CI95 Rate | σ(rate) | Bytes/s | CI95 Bytes | σ(bytes) | Jitter [ms] | CI95 Jitter | Stal [ms] | CI95 Stal | Median Stal | p95 Stal | Ingest E2E [ms] | CI95 Ingest | Emit E2E [ms] | CI95 Emit |
 |---|:--:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| ${evaluated
-    .map(s => {
-      const nUsed = (s as any).nUsed ?? s.count;
-      const nTotal = (s as any).nTotal ?? s.count;
-      const ciRate = (s as any).ci95Rate ?? 0;
-      const ciBytes = (s as any).ci95Bytes ?? 0;
-      const rateStd = (s as any).rateStd ?? 0;
-      const bytesStd = (s as any).bytesStd ?? 0;
-      const ciJitter = (s as any).ci95Jitter ?? 0;
-      const jitterStd = (s as any).jitterStd ?? 0;
-      const ciFresh = (s as any).ci95Fresh ?? 0;
-      const freshStd = (s as any).freshStd ?? 0;
-      const freshMedian = (s as any).freshMedian ?? 0;
-      const freshP95 = (s as any).freshP95 ?? 0;
-      const ingestAvg = (s as any).ingestAvgMs ?? NaN;
-      const ciIngest = (s as any).ci95IngestMs ?? 0;
-      const emitAvg = (s as any).emitAvgMs ?? NaN;
-      const ciEmit = (s as any).ci95EmitMs ?? 0;
-      const f2 = (x: number) => Number(x).toFixed(2);
-      const f0 = (x: number) => Number(x).toFixed(0);
-      const f1 = (x: number) => Number(x).toFixed(1);
-      return `| ${s.label} | ${nUsed}/${nTotal} | ${f2(s.avgRate)} | ± ${f2(ciRate)} | ${f2(rateStd)} | ${f0(s.avgBytesRate)} | ± ${f0(ciBytes)} | ${f0(bytesStd)} | ${f1((s as any).avgJitterMs)} | ± ${f1(ciJitter)} | ${f0((s as any).avgFreshnessMs)} | ± ${f0(ciFresh)} | ${f0(freshMedian)} | ${f0(freshP95)} | ${Number.isFinite(ingestAvg) ? f0(ingestAvg) : '—'} | ± ${f0(ciIngest)} | ${Number.isFinite(emitAvg) ? f0(emitAvg) : '—'} | ± ${f0(ciEmit)} |`;
-    })
-    .join('\n')}
+${evaluated
+  .map(s => {
+    const nUsed = (s as any).nUsed ?? s.count;
+    const nTotal = (s as any).nTotal ?? s.count;
+    const ciRate = (s as any).ci95Rate ?? 0;
+    const ciBytes = (s as any).ci95Bytes ?? 0;
+    const rateStd = (s as any).rateStd ?? 0;
+    const bytesStd = (s as any).bytesStd ?? 0;
+    const ciJitter = (s as any).ci95Jitter ?? 0;
+    const jitterStd = (s as any).jitterStd ?? 0;
+    const ciFresh = (s as any).ci95Fresh ?? 0;
+    const freshStd = (s as any).freshStd ?? 0;
+    const freshMedian = (s as any).freshMedian ?? 0;
+    const freshP95 = (s as any).freshP95 ?? 0;
+    const ingestAvg = (s as any).ingestAvgMs ?? NaN;
+    const ciIngest = (s as any).ci95IngestMs ?? 0;
+    const emitAvg = (s as any).emitAvgMs ?? NaN;
+    const ciEmit = (s as any).ci95EmitMs ?? 0;
+    const f2 = (x: number) => Number(x).toFixed(2);
+    const f0 = (x: number) => Number(x).toFixed(0);
+    const f1 = (x: number) => Number(x).toFixed(1);
+    return `| ${s.label} | ${nUsed}/${nTotal} | ${f2(s.avgRate)} | ± ${f2(ciRate)} | ${f2(rateStd)} | ${f0(s.avgBytesRate)} | ± ${f0(ciBytes)} | ${f0(bytesStd)} | ${f1((s as any).avgJitterMs)} | ± ${f1(ciJitter)} | ${f0((s as any).avgFreshnessMs)} | ± ${f0(ciFresh)} | ${f0(freshMedian)} | ${f0(freshP95)} | ${Number.isFinite(ingestAvg) ? f0(ingestAvg) : '—'} | ± ${f0(ciIngest)} | ${Number.isFinite(emitAvg) ? f0(emitAvg) : '—'} | ± ${f0(ciEmit)} |`;
+  })
+  .join('\n')}
 
 ## Porównanie wg obciążenia (przegląd)
 

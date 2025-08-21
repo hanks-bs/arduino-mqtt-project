@@ -63,88 +63,103 @@ export default function LiveKpis({ payload }: LiveKpisProps) {
 			: "#d32f2f";
 
 	return (
-		<Grid container spacing={2} sx={{ mt: 1 }}>
-			{/* Temperature KPI */}
-			<Grid size={{ xs: 12, sm: 6, md: 3 }}>
-				<Card sx={{ height: "100%" }}>
-					<CardContent>
-						<Typography variant='subtitle2' color='text.secondary'>
-							Temperatura (°C)
-						</Typography>
-						<Typography variant='h4' sx={{ color: tempColor }}>
-							{temp.toFixed(2)}
-						</Typography>
-						<Typography variant='caption' color='text.secondary'>
-							Δ {formatDelta(temp, prevTemp, 2)}°C od poprzedniego
-						</Typography>
-						<Box sx={{ mt: 1 }}>
-							<LinearProgress
-								variant='determinate'
-								value={Math.min(100, (temp / 50) * 100)}
-								sx={{
-									height: 6,
-									borderRadius: 3,
-									[`& .MuiLinearProgress-bar`]: { backgroundColor: tempColor },
-								}}
-							/>
-						</Box>
-					</CardContent>
-				</Card>
+		<Box>
+			<Typography variant='h6' gutterBottom>
+				Aktualne wyniki
+			</Typography>
+			<Grid container spacing={2} sx={{ mt: 0 }}>
+				{/* Temperature KPI */}
+				<Grid size={{ xs: 12, sm: 6, md: 3 }}>
+					<Card
+						sx={{ height: "100%", display: "flex", flexDirection: "column" }}
+						elevation={2}>
+						<CardContent>
+							<Typography variant='subtitle2' color='text.secondary'>
+								Temperatura (°C)
+							</Typography>
+							<Typography variant='h4' sx={{ color: tempColor }}>
+								{temp.toFixed(2)}
+							</Typography>
+							<Typography variant='caption' color='text.secondary'>
+								Δ {formatDelta(temp, prevTemp, 2)}°C od poprzedniego
+							</Typography>
+							<Box sx={{ mt: 1 }}>
+								<LinearProgress
+									variant='determinate'
+									value={Math.min(100, (temp / 50) * 100)}
+									sx={{
+										height: 6,
+										borderRadius: 3,
+										[`& .MuiLinearProgress-bar`]: {
+											backgroundColor: tempColor,
+										},
+									}}
+								/>
+							</Box>
+						</CardContent>
+					</Card>
+				</Grid>
+				{/* Potentiometer KPI */}
+				<Grid size={{ xs: 12, sm: 6, md: 3 }}>
+					<Card
+						sx={{ height: "100%", display: "flex", flexDirection: "column" }}
+						elevation={2}>
+						<CardContent>
+							<Typography variant='subtitle2' color='text.secondary'>
+								Potencjometr (%)
+							</Typography>
+							<Typography variant='h4'>{potPct.toFixed(2)}%</Typography>
+							<Typography variant='caption' color='text.secondary'>
+								Δ {formatDelta(potPct, prevPotPct, 2)} pp
+							</Typography>
+							<Box sx={{ mt: 1 }}>
+								<LinearProgress
+									variant='determinate'
+									value={potPct}
+									sx={{ height: 6, borderRadius: 3 }}
+								/>
+							</Box>
+						</CardContent>
+					</Card>
+				</Grid>
+				{/* Uptime */}
+				<Grid size={{ xs: 12, sm: 6, md: 3 }}>
+					<Card
+						sx={{ height: "100%", display: "flex", flexDirection: "column" }}
+						elevation={2}>
+						<CardContent>
+							<Typography variant='subtitle2' color='text.secondary'>
+								Czas pracy (s)
+							</Typography>
+							<Typography variant='h4'>{last.uptimeSec ?? 0}</Typography>
+							<Typography variant='caption' color='text.secondary'>
+								Liczba odczytów: {last.readingCount}
+							</Typography>
+						</CardContent>
+					</Card>
+				</Grid>
+				{/* Timestamp */}
+				<Grid size={{ xs: 12, sm: 6, md: 3 }}>
+					<Card
+						sx={{ height: "100%", display: "flex", flexDirection: "column" }}
+						elevation={2}>
+						<CardContent>
+							<Typography variant='subtitle2' color='text.secondary'>
+								Znacznik czasu
+							</Typography>
+							<Typography variant='body2'>
+								{new Date(last.timestamp ?? Date.now()).toLocaleTimeString()}
+							</Typography>
+							<Typography variant='caption' color='text.secondary'>
+								ISO:{" "}
+								{typeof last.timestamp === "string"
+									? last.timestamp.split("T")[1]?.replace("Z", "")
+									: "—"}
+							</Typography>
+						</CardContent>
+					</Card>
+				</Grid>
 			</Grid>
-			{/* Potentiometer KPI */}
-			<Grid size={{ xs: 12, sm: 6, md: 3 }}>
-				<Card sx={{ height: "100%" }}>
-					<CardContent>
-						<Typography variant='subtitle2' color='text.secondary'>
-							Potencjometr (%)
-						</Typography>
-						<Typography variant='h4'>{potPct.toFixed(2)}%</Typography>
-						<Typography variant='caption' color='text.secondary'>
-							Δ {formatDelta(potPct, prevPotPct, 2)} pp
-						</Typography>
-						<Box sx={{ mt: 1 }}>
-							<LinearProgress
-								variant='determinate'
-								value={potPct}
-								sx={{ height: 6, borderRadius: 3 }}
-							/>
-						</Box>
-					</CardContent>
-				</Card>
-			</Grid>
-			{/* Uptime */}
-			<Grid size={{ xs: 12, sm: 6, md: 3 }}>
-				<Card sx={{ height: "100%" }}>
-					<CardContent>
-						<Typography variant='subtitle2' color='text.secondary'>
-							Czas pracy (s)
-						</Typography>
-						<Typography variant='h4'>{last.uptimeSec ?? 0}</Typography>
-						<Typography variant='caption' color='text.secondary'>
-							Liczba odczytów: {last.readingCount}
-						</Typography>
-					</CardContent>
-				</Card>
-			</Grid>
-			{/* Timestamp */}
-			<Grid size={{ xs: 12, sm: 6, md: 3 }}>
-				<Card sx={{ height: "100%" }}>
-					<CardContent>
-						<Typography variant='subtitle2' color='text.secondary'>
-							Znacznik czasu
-						</Typography>
-						<Typography variant='body2'>
-							{new Date(last.timestamp ?? Date.now()).toLocaleTimeString()}
-						</Typography>
-						<Typography variant='caption' color='text.secondary'>
-							ISO:{" "}
-							{typeof last.timestamp === "string"
-								? last.timestamp.split("T")[1]?.replace("Z", "")
-								: "—"}
-						</Typography>
-					</CardContent>
-				</Card>
-			</Grid>
-		</Grid>
+		</Box>
 	);
 }

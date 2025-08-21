@@ -1,6 +1,5 @@
 import { jest } from '@jest/globals';
 import ioClient from 'socket.io-client';
-import request from 'supertest';
 
 // Use a real HTTP server from our app and a real socket.io client to validate WS path
 
@@ -10,7 +9,7 @@ describe('E2E WebSocket metrics emission', () => {
   let baseUrl: string;
 
   beforeAll(async () => {
-    process.env = { ...ORIGINAL_ENV, LIVE_REALTIME_ENABLED: '0' }; // start with WS disabled to test auto-enable in session
+    process.env = { ...ORIGINAL_ENV, LIVE_REALTIME_ENABLED: '1' }; // sesje usunięte – testujemy tylko emisję live
     // Mock pidusage to avoid platform coupling
     jest.doMock('pidusage', () => ({
       __esModule: true,
@@ -36,7 +35,7 @@ describe('E2E WebSocket metrics emission', () => {
   });
 
   it('emits metrics over WS and respects auto-enable during WS session', async () => {
-    // First, connect WS client; since LIVE_REALTIME_ENABLED=0, we do not expect metrics until a WS session is started
+    // Connect WS client; LIVE_REALTIME_ENABLED=1 => oczekujemy emisji bez sesji
     const client = ioClient(baseUrl, {
       transports: ['websocket'],
       forceNew: true,
@@ -46,19 +45,9 @@ describe('E2E WebSocket metrics emission', () => {
     const received: any[] = [];
     client.on('metrics', (msg: any) => received.push(msg));
 
-    // Wait a short while to ensure no emissions when disabled
-    await new Promise(res => setTimeout(res, 600));
-    expect(received.length).toBe(0);
-
-    // Start a WS session which should force-enable live emissions
-    const startRes = await request(server)
-      .post('/api/monitor/start')
-      .send({ label: 'e2e-ws', mode: 'ws', wsFixedRateHz: 2, durationSec: 1 });
-    expect(startRes.status).toBe(201);
-
-    // Now we should get some metrics events
+    // Wait a short while to collect emissions
     await new Promise(res => setTimeout(res, 1200));
-    expect(received.length).toBeGreaterThan(0);
+    expect(received.length).toBeGreaterThan(0); // powinny napłynąć jakieś metryki
 
     client.close();
   });

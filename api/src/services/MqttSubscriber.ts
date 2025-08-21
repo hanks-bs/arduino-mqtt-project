@@ -63,6 +63,9 @@ let latestArduinoData: string = 'Brak danych';
  * Rolling history of validated readings (capped to 1000 entries).
  */
 const history: any[] = [];
+/** Bazowy epoch (ms) wyliczony przy pierwszym (lub po restarcie) odczycie: epoch = Date.now() - readingTime. */
+let arduinoEpochBase: number | null = null;
+let lastReadingTimeMs: number | null = null;
 
 /**
  * Initializes a resilient MQTT subscriber.
@@ -152,13 +155,36 @@ export const initMqttSubscriber = (): void => {
         let sourceIso = new Date().toISOString();
         try {
           if (typeof parsed.readingTime === 'number') {
+            const rt = parsed.readingTime; // ms od startu Arduino
             const now = Date.now();
-            // Zakładamy że readingTime pochodzi z millis() tego samego cyklu publikacji, więc approximate epoch
-            // Nie mamy bezwzględnego offsetu, więc mapowanie przybliżone; dla E2E ważniejsza jest różnica ingest - source
-            const approx = now - (parsed.readingTime % (24 * 3600 * 1000));
-            if (approx > 0 && Math.abs(now - approx) < 24 * 3600 * 1000) {
+            // Re‑inicjalizuj bazę gdy brak, readingTime się cofnął (restart Arduino) albo minęło >12h bez resetu
+            if (
+              arduinoEpochBase === null ||
+              (lastReadingTimeMs !== null && rt < lastReadingTimeMs) ||
+              (arduinoEpochBase !== null && now - arduinoEpochBase > 12 * 3600 * 1000)
+            ) {
+              arduinoEpochBase = now - rt;
+            }
+            lastReadingTimeMs = rt;
+            const approx = arduinoEpochBase + rt;
+            if (approx > 0 && approx <= now + 2000) {
               sourceIso = new Date(approx).toISOString();
             }
+          }
+        } catch {}
+        // Monotoniczność: jeśli nowy nie większy od ostatniego, podbij +1ms
+        try {
+          const lastTs = history.length
+            ? Date.parse((history[history.length - 1] as any).timestamp)
+            : null;
+          const currentTs = Date.parse(sourceIso);
+          if (
+            lastTs &&
+            !Number.isNaN(lastTs) &&
+            !Number.isNaN(currentTs) &&
+            currentTs <= lastTs
+          ) {
+            sourceIso = new Date(lastTs + 1).toISOString();
           }
         } catch {}
         const recordWithTimestamp: ArduinoResponseTypeWithTimestamp = {
