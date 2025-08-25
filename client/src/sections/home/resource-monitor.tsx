@@ -3,7 +3,16 @@
 
 import type { LiveMetrics } from "@/types/monitoring";
 import { useSocketIOEvent } from "@/websocket/providers/websocket-provider";
-import { Box, Chip, Grid, Paper, Stack, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
+import {
+	Box,
+	Chip,
+	Grid,
+	Paper,
+	Stack,
+	ToggleButton,
+	ToggleButtonGroup,
+	Typography,
+} from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import type { ApexOptions } from "apexcharts";
 import dynamic from "next/dynamic";
@@ -268,7 +277,7 @@ export default function ResourceMonitor({
 
 	const last = series[series.length - 1];
 
-	const [view, setView] = useState<'compare' | 'system'>('compare');
+	const [view, setView] = useState<"compare" | "system">("compare");
 
 	return (
 		<Box>
@@ -293,13 +302,17 @@ export default function ResourceMonitor({
 					<ToggleButton value='compare'>Porównanie protokołów</ToggleButton>
 					<ToggleButton value='system'>Parametry systemowe</ToggleButton>
 				</ToggleButtonGroup>
-				{view === 'compare' && (
-					<Typography variant='caption' color='text.secondary' sx={{ alignSelf: 'center' }}>
-						Porównania liczą WS per komunikat (bez mnożenia przez klientów) dla tempa oraz per klient dla kosztu sieci.
+				{view === "compare" && (
+					<Typography
+						variant='caption'
+						color='text.secondary'
+						sx={{ alignSelf: "center" }}>
+						Porównania liczą WS per komunikat (bez mnożenia przez klientów) dla
+						tempa oraz per klient dla kosztu sieci.
 					</Typography>
 				)}
 			</Stack>
-			{view === 'system' && (
+			{view === "system" && (
 				<Grid container spacing={2}>
 					<Grid size={{ xs: 12, md: 6 }}>
 						<Paper sx={{ p: 2 }}>
@@ -309,8 +322,9 @@ export default function ResourceMonitor({
 								type='line'
 								height={220}
 							/>
-							<Box sx={{ mt: 1, fontSize: 12, color: 'text.secondary' }}>
-								CPU (%) procesu. Stabilnie niżej = większy zapas. Skoki oznaczają intensywne prace GC lub I/O.
+							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
+								CPU (%) procesu. Stabilnie niżej = większy zapas. Skoki
+								oznaczają intensywne prace GC lub I/O.
 							</Box>
 						</Paper>
 					</Grid>
@@ -322,15 +336,21 @@ export default function ResourceMonitor({
 								type='line'
 								height={220}
 							/>
-							<Box sx={{ mt: 1, fontSize: 12, color: 'text.secondary' }}>
-								Pamięć. Rosnący trend RSS/Heap Used może wskazywać na wycieki lub większe bufory.
+							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
+								Pamięć. Rosnący trend RSS/Heap Used może wskazywać na wycieki
+								lub większe bufory.
 							</Box>
 						</Paper>
 					</Grid>
 					<Grid size={{ xs: 12, md: 6 }}>
 						<Paper sx={{ p: 2 }}>
-							<Chart options={eluOptions} series={eluSeries} type='line' height={220} />
-							<Box sx={{ mt: 1, fontSize: 12, color: 'text.secondary' }}>
+							<Chart
+								options={eluOptions}
+								series={eluSeries}
+								type='line'
+								height={220}
+							/>
+							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
 								ELU – wykorzystanie pętli zdarzeń. Blisko 1 = ryzyko opóźnień.
 							</Box>
 						</Paper>
@@ -343,122 +363,126 @@ export default function ResourceMonitor({
 								type='line'
 								height={220}
 							/>
-							<Box sx={{ mt: 1, fontSize: 12, color: 'text.secondary' }}>
-								Opóźnienie pętli (p50/p99/max). Niżej = płynniejsze przetwarzanie.
+							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
+								Opóźnienie pętli (p50/p99/max). Niżej = płynniejsze
+								przetwarzanie.
 							</Box>
 						</Paper>
 					</Grid>
 				</Grid>
 			)}
-			{view === 'compare' && (
+			{view === "compare" && (
 				<Grid container spacing={2}>
-				<Grid size={{ xs: 12, md: 6 }}>
-					<Paper sx={{ p: 2 }}>
-						<Chart
-							options={cpuOptions}
-							series={cpuSeries}
-							type='line'
-							height={220}
-						/>
-						<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
-							CPU (% procesu). Niżej = mniejsze zużycie przy danym obciążeniu
-							(więcej zapasu). Wysokie i rosnące wartości mogą ograniczyć
-							skalowalność.
-						</Box>
-					</Paper>
-				</Grid>
-				<Grid size={{ xs: 12, md: 6 }}>
-					<Paper sx={{ p: 2 }}>
-						<Chart
-							options={memOptions}
-							series={memSeries}
-							type='line'
-							height={220}
-						/>
-						<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
-							Pamięć (RSS + Heap Used). Stabilnie i niżej = lepiej.
-							Skok/pełzanie w górę może sugerować wycieki lub presję GC.
-						</Box>
-					</Paper>
-				</Grid>
+					<Grid size={{ xs: 12, md: 6 }}>
+						<Paper sx={{ p: 2 }}>
+							<Chart
+								options={cpuOptions}
+								series={cpuSeries}
+								type='line'
+								height={220}
+							/>
+							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
+								CPU (% procesu). Niżej = mniejsze zużycie przy danym obciążeniu
+								(więcej zapasu). Wysokie i rosnące wartości mogą ograniczyć
+								skalowalność.
+							</Box>
+						</Paper>
+					</Grid>
+					<Grid size={{ xs: 12, md: 6 }}>
+						<Paper sx={{ p: 2 }}>
+							<Chart
+								options={memOptions}
+								series={memSeries}
+								type='line'
+								height={220}
+							/>
+							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
+								Pamięć (RSS + Heap Used). Stabilnie i niżej = lepiej.
+								Skok/pełzanie w górę może sugerować wycieki lub presję GC.
+							</Box>
+						</Paper>
+					</Grid>
 
-				<Grid size={{ xs: 12, md: 6 }}>
-					<Paper sx={{ p: 2 }}>
-						<Chart
-							options={eluOptions}
-							series={eluSeries}
-							type='line'
-							height={220}
-						/>
-						<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
-							ELU (Event Loop Utilization 0..1). Wyżej =&gt; bardziej zajęta
-							pętla. Ciągłe wartości blisko 1 grożą rosnącym opóźnieniem
-							reakcji.
-						</Box>
-					</Paper>
-				</Grid>
-				<Grid size={{ xs: 12, md: 6 }}>
-					<Paper sx={{ p: 2 }}>
-						<Chart
-							options={loopDelayOptions}
-							series={loopDelaySeries}
-							type='line'
-							height={220}
-						/>
-						<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
-							Opóźnienie pętli zdarzeń (p50/p99/max). Niżej = mniejsze lagi
-							aplikacji. Szczyty max to pojedyncze zacięcia.
-						</Box>
-					</Paper>
-				</Grid>
+					<Grid size={{ xs: 12, md: 6 }}>
+						<Paper sx={{ p: 2 }}>
+							<Chart
+								options={eluOptions}
+								series={eluSeries}
+								type='line'
+								height={220}
+							/>
+							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
+								ELU (Event Loop Utilization 0..1). Wyżej =&gt; bardziej zajęta
+								pętla. Ciągłe wartości blisko 1 grożą rosnącym opóźnieniem
+								reakcji.
+							</Box>
+						</Paper>
+					</Grid>
+					<Grid size={{ xs: 12, md: 6 }}>
+						<Paper sx={{ p: 2 }}>
+							<Chart
+								options={loopDelayOptions}
+								series={loopDelaySeries}
+								type='line'
+								height={220}
+							/>
+							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
+								Opóźnienie pętli zdarzeń (p50/p99/max). Niżej = mniejsze lagi
+								aplikacji. Szczyty max to pojedyncze zacięcia.
+							</Box>
+						</Paper>
+					</Grid>
 
-				<Grid size={{ xs: 12, md: 6 }}>
-					<Paper sx={{ p: 2 }}>
-						<Chart
-							options={tempoOptions}
-							series={tempoSeries}
-							type='line'
-							height={260}
-						/>
-						<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
-							Tempo zdarzeń: HTTP req/s (odpowiedzi), WS msg/s (komunikaty). Δ%
-							= różnica względna (WS-HTTP)/HTTP. Wyżej = większa przepustowość.
-							Fair: WS liczymy per komunikat (nie mnożymy przez klientów), by
-							uniknąć sztucznego wzrostu przy broadcast.
-						</Box>
-					</Paper>
+					<Grid size={{ xs: 12, md: 6 }}>
+						<Paper sx={{ p: 2 }}>
+							<Chart
+								options={tempoOptions}
+								series={tempoSeries}
+								type='line'
+								height={260}
+							/>
+							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
+								Tempo zdarzeń: HTTP req/s (odpowiedzi), WS msg/s (komunikaty).
+								Δ% = różnica względna (WS-HTTP)/HTTP. Wyżej = większa
+								przepustowość. Fair: WS liczymy per komunikat (nie mnożymy przez
+								klientów), by uniknąć sztucznego wzrostu przy broadcast.
+							</Box>
+						</Paper>
+					</Grid>
+					<Grid size={{ xs: 12, md: 6 }}>
+						<Paper sx={{ p: 2 }}>
+							<Chart
+								options={kosztOptions}
+								series={kosztSeries}
+								type='line'
+								height={260}
+							/>
+							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
+								Koszt sieci: total B/s = sumaryczne bajty (dla WS mnożone przez
+								liczbę klientów – realny egress). Avg B/* = średni rozmiar
+								ładunku (bez mnożenia). Δ% pokazuje względną różnicę kosztu.
+								Niżej total B/s przy podobnym tempie = bardziej efektywne.
+							</Box>
+						</Paper>
+					</Grid>
+					<Grid size={{ xs: 12, md: 6 }}>
+						<Paper sx={{ p: 2 }}>
+							<Chart
+								options={stabilityOptions}
+								series={stabilitySeries}
+								type='line'
+								height={260}
+							/>
+							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
+								Stabilność i świeżość: jitter = zmienność interwałów
+								(niżej=stabilniej), freshness = wiek danych (niżej=aktualniej).
+								Δ jitter dodatni oznacza większą zmienność WS vs HTTP. Niższe
+								jitter+freshness = szybsza reakcja systemu.
+							</Box>
+						</Paper>
+					</Grid>
 				</Grid>
-				<Grid size={{ xs: 12, md: 6 }}>
-					<Paper sx={{ p: 2 }}>
-						<Chart
-							options={kosztOptions}
-							series={kosztSeries}
-							type='line'
-							height={260}
-						/>
-						<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
-							Koszt sieci: total B/s = sumaryczne bajty (dla WS mnożone przez
-							liczbę klientów – realny egress). Avg B/* = średni rozmiar ładunku
-							(bez mnożenia). Δ% pokazuje względną różnicę kosztu. Niżej total
-							B/s przy podobnym tempie = bardziej efektywne.
-						</Box>
-					</Paper>
-				</Grid>
-				<Grid size={{ xs: 12, md: 6 }}>
-					<Paper sx={{ p: 2 }}>
-						<Chart
-							options={stabilityOptions}
-							series={stabilitySeries}
-							type='line'
-							height={260}
-						/>
-						<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
-							Stabilność i świeżość: jitter = zmienność interwałów (niżej=stabilniej), freshness = wiek danych (niżej=aktualniej). Δ jitter dodatni oznacza większą zmienność WS vs HTTP. Niższe jitter+freshness = szybsza reakcja systemu.
-						</Box>
-					</Paper>
-				</Grid>
-			</Grid>
-		)}
+			)}
 		</Box>
 	);
 }

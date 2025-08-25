@@ -150,6 +150,10 @@ class ResearchRunsController {
     (async () => {
       try {
         const opts = req.body || {};
+        // Allow simple realData boolean or string 'true' from UI to enable passive real data measurement mode
+        if (typeof (opts as any).realData === 'string') {
+          (opts as any).realData = /^true|1|yes$/i.test((opts as any).realData);
+        }
         // zachowaj konfigurację + skrót
         status.config = opts;
         status.configLabel = summarizeConfig(opts);
@@ -239,9 +243,12 @@ class ResearchRunsController {
             // fallback: mtime katalogu
             startedAt = stat.mtime.toISOString();
           }
-          // wczytaj runConfig dla etykiety
+          // wczytaj runConfig dla etykiety + flags + dokładne czasy jeśli dostępne
           let configLabel: string | undefined;
           let config: any;
+          let flags: any;
+          let runStartedAt: string | undefined;
+          let runFinishedAt: string | undefined;
           try {
             const summary = await fs.readJSON(summaryPath);
             const rc =
@@ -253,14 +260,18 @@ class ResearchRunsController {
               config = rc;
               configLabel = summarizeConfig(rc);
             }
+            if (summary?.flags) flags = summary.flags;
+            if (summary?.runStartedAt) runStartedAt = summary.runStartedAt;
+            if (summary?.runFinishedAt) runFinishedAt = summary.runFinishedAt;
           } catch {}
           fileRuns.push({
             id: dir, // użyj nazwy folderu jako ID runu archiwalnego
-            startedAt,
-            finishedAt: stat.mtime.toISOString(),
+            startedAt: runStartedAt || startedAt,
+            finishedAt: runFinishedAt || stat.mtime.toISOString(),
             outDir: full,
             config,
             configLabel,
+            flags,
           });
         }
       }
@@ -288,6 +299,9 @@ class ResearchRunsController {
         const stat = await fs.stat(benchDir).catch(() => null);
         let config: any;
         let configLabel: string | undefined;
+        let flags: any;
+        let startedAt: string | undefined;
+        let finishedAt: string | undefined;
         try {
           const summary = await fs.readJSON(summaryPath);
           const rc =
@@ -299,16 +313,18 @@ class ResearchRunsController {
             config = rc;
             configLabel = summarizeConfig(rc);
           }
+          if (summary?.flags) flags = summary.flags;
+          startedAt = summary?.runStartedAt;
+          finishedAt = summary?.runFinishedAt;
         } catch {}
         st = {
           id: req.params.id,
-          startedAt: stat ? stat.mtime.toISOString() : new Date().toISOString(),
-          finishedAt: stat
-            ? stat.mtime.toISOString()
-            : new Date().toISOString(),
+          startedAt: startedAt || (stat ? stat.mtime.toISOString() : new Date().toISOString()),
+          finishedAt: finishedAt || (stat ? stat.mtime.toISOString() : new Date().toISOString()),
           outDir: benchDir,
           config,
           configLabel,
+          flags,
         };
       }
     }
@@ -404,6 +420,8 @@ class ResearchRunsController {
       wsMsgRate: idx('wsMsgRate'),
       httpBytesRate: idx('httpBytesRate'),
       wsBytesRate: idx('wsBytesRate'),
+      httpAvgBytesPerReq: idx('httpAvgBytesPerReq'),
+      wsAvgBytesPerMsg: idx('wsAvgBytesPerMsg'),
       httpJitterMs: idx('httpJitterMs'),
       wsJitterMs: idx('wsJitterMs'),
       dataFreshnessMs: idx('dataFreshnessMs'),
@@ -445,6 +463,14 @@ class ResearchRunsController {
           sess.mode === 'polling'
             ? Number(parts[col.httpBytesRate])
             : Number(parts[col.wsBytesRate]),
+        avgPayloadBytes:
+          (() => {
+            const v =
+              sess.mode === 'polling'
+                ? Number(parts[col.httpAvgBytesPerReq])
+                : Number(parts[col.wsAvgBytesPerMsg]);
+            return Number.isFinite(v) && v > 0 ? v : undefined;
+          })(),
         jitterMs:
           sess.mode === 'polling'
             ? Number(parts[col.httpJitterMs])

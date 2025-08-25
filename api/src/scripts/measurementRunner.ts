@@ -28,17 +28,36 @@ type RunCfg = {
   mode: 'ws' | 'polling';
   hz: number; // target frequency (msg/s or req/s)
   durationSec: number;
-  payloadBytes: number; // assumed payload size in bytes
+  payloadBytes?: number; // assumed payload size in bytes (synthetic mode); undefined in realData mode
   loadCpuPct?: number; // optional background CPU load during session
   loadWorkers?: number; // optional number of load workers
   clientsHttp?: number; // number of synthetic HTTP pollers
   clientsWs?: number; // number of synthetic WS clients
   warmupSec?: number;
   cooldownSec?: number;
+  realData?: boolean; // when true, do NOT generate synthetic payload or controlled drivers; observe real MQTT+HTTP traffic
 };
 
 async function runWsControlled(cfg: RunCfg): Promise<SessionRecord> {
   const { label, hz, durationSec, payloadBytes, loadCpuPct, loadWorkers } = cfg;
+  // In realData mode we run a passive WS session (no controlled driver) – just attach synthetic clients if requested
+  if (cfg.realData) {
+    const rec = ResourceMonitor.startSession({
+      label,
+      mode: 'ws',
+      durationSec,
+      warmupSec: cfg.warmupSec,
+      cooldownSec: cfg.cooldownSec,
+      loadCpuPct,
+      loadWorkers,
+      clientsWs: Math.max(0, Math.floor(cfg.clientsWs ?? 0)) || undefined,
+      resetCounters: true,
+      // passive: no wsFixedRateHz, no isolation (we want natural emissions)
+    });
+    await sleep(durationSec * 1000 + 600);
+    ResourceMonitor.finishSession(rec.id);
+    return ResourceMonitor.getSession(rec.id)!;
+  }
   // WS emituje broadcast: Rate dotyczy liczby emisji (nie mnożymy przez liczbę klientów)
   // Przepływność B/s będzie skalowana przez liczbę klientów w onWsEmit.
   const effHz = hz;
@@ -66,15 +85,31 @@ async function runWsControlled(cfg: RunCfg): Promise<SessionRecord> {
 async function runHttpSimulated(cfg: RunCfg): Promise<SessionRecord> {
   const { label, hz, durationSec, payloadBytes, loadCpuPct, loadWorkers } = cfg;
   const periodMs = Math.max(50, Math.round(1000 / Math.max(0.001, hz)));
-  // Upewnij się, że synthetic HTTP użyje żądanego payloadu (spójność z etykietą)
+  if (cfg.realData) {
+    // Real data mode: use real endpoint via internal HTTP driver (network call) – do not enforce synthetic payload
+    const clients = Math.max(0, Math.floor(cfg.clientsHttp ?? 1));
+    const rec = ResourceMonitor.startSession({
+      label,
+      mode: 'polling',
+      pollingIntervalMs: periodMs,
+      durationSec,
+      warmupSec: cfg.warmupSec,
+      cooldownSec: cfg.cooldownSec,
+      loadCpuPct,
+      loadWorkers,
+      clientsHttp: clients,
+      // internalHttpDriver left as default (true) to hit real /api/arduino-data
+      resetCounters: true,
+    });
+    await sleep(durationSec * 1000 + 600);
+    ResourceMonitor.finishSession(rec.id);
+    return ResourceMonitor.getSession(rec.id)!;
+  }
+  // Synthetic benchmark mode
   try {
-    ResourceMonitor.noteArduinoPayloadSize(payloadBytes);
+    ResourceMonitor.noteArduinoPayloadSize(payloadBytes as number);
   } catch {}
-  // W trybie standalone nie ma działającego serwera HTTP, więc korzystamy z syntetycznych ticków.
-  // Jeśli liczba klientów nie została ustawiona (undefined), przyjmij 1, aby wymusić aktywność.
-  // Jeżeli użytkownik jawnie poda 0, zachowujemy 0 (brak aktywności dla parowania scenariuszy z WS=0).
-  const clients =
-    cfg.clientsHttp == null ? 1 : Math.max(0, Math.floor(cfg.clientsHttp));
+  const clients = cfg.clientsHttp == null ? 1 : Math.max(0, Math.floor(cfg.clientsHttp));
   const rec = ResourceMonitor.startSession({
     label,
     mode: 'polling',
@@ -84,12 +119,10 @@ async function runHttpSimulated(cfg: RunCfg): Promise<SessionRecord> {
     cooldownSec: cfg.cooldownSec,
     loadCpuPct,
     loadWorkers,
-    // Włączamy syntetyczne żądania: domyślnie co najmniej 1 klient
     clientsHttp: clients,
     internalHttpDriver: false,
     resetCounters: true,
   });
-  // Rely solely on ResourceMonitor's synthetic HTTP driver (started by startSession when internalHttpDriver=false and clientsHttp>0)
   await sleep(durationSec * 1000 + 600);
   ResourceMonitor.finishSession(rec.id);
   return ResourceMonitor.getSession(rec.id)!;
@@ -732,6 +765,7 @@ type MeasureOpts = {
   payloadWs?: number; // WS-specific payload
   payloadHttp?: number; // HTTP-specific payload
   pair?: boolean; // pair WS/HTTP scenarios for the same parameters
+  realData?: boolean; // passive measurement on real MQTT/HTTP data (no synthetic drivers / payload equality checks)
 };
 
 export type RunProgress = {
@@ -767,7 +801,10 @@ export async function runMeasurements(
   }
   // Init monitor
   ResourceMonitor.init(fakeIo as any);
-  ResourceMonitor.setLiveEmitEnabled(false);
+  // In synthetic benchmark mode we suppress live emissions for isolation. In realData mode we must allow them.
+  if (!opts.realData) {
+    ResourceMonitor.setLiveEmitEnabled(false);
+  }
 
   // Define runs: two per method
   const durationSec = Number(
@@ -776,12 +813,14 @@ export async function runMeasurements(
   const basePayload = Number(
     opts.payload ?? process.env.MEASURE_PAYLOAD ?? '360',
   );
-  const wsPayload = Number(
-    opts.payloadWs ?? process.env.MEASURE_PAYLOAD_WS ?? basePayload,
-  );
-  const httpPayload = Number(
-    opts.payloadHttp ?? process.env.MEASURE_PAYLOAD_HTTP ?? basePayload,
-  );
+  const wsPayload = opts.realData
+    ? undefined
+    : Number(opts.payloadWs ?? process.env.MEASURE_PAYLOAD_WS ?? basePayload);
+  const httpPayload = opts.realData
+    ? undefined
+    : Number(
+        opts.payloadHttp ?? process.env.MEASURE_PAYLOAD_HTTP ?? basePayload,
+      );
   const warmupSec = Number(
     opts.warmupSec ?? process.env.MEASURE_WARMUP_SEC ?? '0',
   );
@@ -851,32 +890,34 @@ export async function runMeasurements(
           new Set([...wsClientsList, ...httpClientsList]),
         );
         for (const c of clientUnion) {
-          if (MODES.includes('ws') && wsClientsList.includes(c)) {
+      if (MODES.includes('ws') && wsClientsList.includes(c)) {
             runs.push({
-              label: `WS@${hz}Hz payload=${wsPayload}B${loadLabel}${c ? ` cWs=${c}` : ''}`,
+        label: `WS@${hz}Hz${wsPayload != null ? ` payload=${wsPayload}B` : ''}${loadLabel}${c ? ` cWs=${c}` : ''}${opts.realData ? ' realData' : ''}`,
               mode: 'ws',
               hz,
               durationSec,
-              payloadBytes: wsPayload,
+        payloadBytes: wsPayload,
               loadCpuPct: lp || undefined,
               loadWorkers: lp ? CLI_WORKERS : undefined,
               clientsWs: c || undefined,
               warmupSec: warmupSec || undefined,
               cooldownSec: cooldownSec || undefined,
+        realData: opts.realData || undefined,
             });
           }
           if (MODES.includes('polling') && httpClientsList.includes(c)) {
             runs.push({
-              label: `HTTP@${hz}Hz payload=${httpPayload}B${loadLabel}${c ? ` cHttp=${c}` : ''}`,
+        label: `HTTP@${hz}Hz${httpPayload != null ? ` payload=${httpPayload}B` : ''}${loadLabel}${c ? ` cHttp=${c}` : ''}${opts.realData ? ' realData' : ''}`,
               mode: 'polling',
               hz,
               durationSec,
-              payloadBytes: httpPayload,
+        payloadBytes: httpPayload,
               loadCpuPct: lp || undefined,
               loadWorkers: lp ? CLI_WORKERS : undefined,
               clientsHttp: c || undefined,
               warmupSec: warmupSec || undefined,
               cooldownSec: cooldownSec || undefined,
+        realData: opts.realData || undefined,
             });
           }
         }
@@ -886,16 +927,17 @@ export async function runMeasurements(
         for (const hz of HZ_SET) {
           for (const cWs of wsClientsList) {
             runs.push({
-              label: `WS@${hz}Hz payload=${wsPayload}B${loadLabel}${cWs ? ` cWs=${cWs}` : ''}`,
+        label: `WS@${hz}Hz${wsPayload != null ? ` payload=${wsPayload}B` : ''}${loadLabel}${cWs ? ` cWs=${cWs}` : ''}${opts.realData ? ' realData' : ''}`,
               mode: 'ws',
               hz,
               durationSec,
-              payloadBytes: wsPayload,
+        payloadBytes: wsPayload,
               loadCpuPct: lp || undefined,
               loadWorkers: lp ? CLI_WORKERS : undefined,
               clientsWs: cWs || undefined,
               warmupSec: warmupSec || undefined,
               cooldownSec: cooldownSec || undefined,
+        realData: opts.realData || undefined,
             });
           }
         }
@@ -904,16 +946,17 @@ export async function runMeasurements(
         for (const hz of HZ_SET) {
           for (const cHttp of httpClientsList) {
             runs.push({
-              label: `HTTP@${hz}Hz payload=${httpPayload}B${loadLabel}${cHttp ? ` cHttp=${cHttp}` : ''}`,
+        label: `HTTP@${hz}Hz${httpPayload != null ? ` payload=${httpPayload}B` : ''}${loadLabel}${cHttp ? ` cHttp=${cHttp}` : ''}${opts.realData ? ' realData' : ''}`,
               mode: 'polling',
               hz,
               durationSec,
-              payloadBytes: httpPayload,
+        payloadBytes: httpPayload,
               loadCpuPct: lp || undefined,
               loadWorkers: lp ? CLI_WORKERS : undefined,
               clientsHttp: cHttp || undefined,
               warmupSec: warmupSec || undefined,
               cooldownSec: cooldownSec || undefined,
+        realData: opts.realData || undefined,
             });
           }
         }
@@ -991,7 +1034,7 @@ export async function runMeasurements(
   const byLoad = aggregateByLoad(evaluated as any);
   const byClients = aggregateByClients(evaluated as any);
 
-  const fairPayloadFlag = wsPayload === httpPayload;
+  const fairPayloadFlag = opts.realData ? undefined : wsPayload === httpPayload;
   const ratios = evaluated
     .map(s =>
       s.expectedRate && s.expectedRate > 0
@@ -1005,8 +1048,9 @@ export async function runMeasurements(
   const flags = {
     fairPayload: fairPayloadFlag,
     sourceLimited: sourceLimitedFlag,
+    realData: !!opts.realData,
   };
-  if (!fairPayloadFlag) {
+  if (fairPayloadFlag === false) {
     console.warn(
       '[Measure] Uwaga: payload WS ≠ HTTP; porównania mogą być nie fair',
     );
@@ -1038,7 +1082,7 @@ export async function runMeasurements(
   } else {
     exportCsv(sessions, csvPath);
   }
-  const runConfig = {
+  const runConfig: any = {
     phase: (process.env as any).MEASURE_PHASE || undefined,
     modes: MODES,
     hzSet: HZ_SET,
@@ -1047,8 +1091,9 @@ export async function runMeasurements(
     monitorTickMs: Number(process.env.MONITOR_TICK_MS || '1000'),
     clientsHttp: CH_SET.length ? CH_SET[0] : CLIENTS_HTTP_SINGLE,
     clientsWs: CW_SET.length ? CW_SET[0] : CLIENTS_WS_SINGLE,
-    wsPayload,
-    httpPayload,
+  wsPayload,
+  httpPayload,
+  realData: !!opts.realData,
     warmupSec,
     cooldownSec,
     repeats,
@@ -1074,6 +1119,29 @@ export async function runMeasurements(
   }
   const combinedByLoad = aggregateByLoad(combinedEvaluated as any);
   const combinedByClients = aggregateByClients(combinedEvaluated as any);
+
+  // Wyznacz czasy start/stop całego runu na podstawie sesji (najwcześniejszy start, najpóźniejsze zakończenie)
+  const runStartedAt = (() => {
+    try {
+      const ts = sessions
+        .map(s => new Date(s.startedAt).getTime())
+        .filter(t => Number.isFinite(t));
+      return ts.length ? new Date(Math.min(...ts)).toISOString() : new Date().toISOString();
+    } catch {
+      return new Date().toISOString();
+    }
+  })();
+  const runFinishedAt = (() => {
+    try {
+      const ts = sessions
+        .map(s => new Date((s as any).finishedAt || s.startedAt).getTime())
+        .filter(t => Number.isFinite(t));
+      return ts.length ? new Date(Math.max(...ts)).toISOString() : runStartedAt;
+    } catch {
+      return runStartedAt;
+    }
+  })();
+
   await fs.writeJSON(
     summaryPath,
     {
@@ -1083,6 +1151,9 @@ export async function runMeasurements(
       flags,
       runConfig,
       runConfigs,
+      // Nowe pola: dokładne czasy startu i zakończenia całego runu
+      runStartedAt,
+      runFinishedAt,
       units: {
         rate: '/s',
         bytesRate: 'B/s',

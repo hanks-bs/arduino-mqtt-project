@@ -39,6 +39,7 @@ export interface ResearchRunRequest {
 	payloadWs?: number;
 	payloadHttp?: number;
 	cpuSampleMs?: number;
+	realData?: boolean; // pasywny tryb pracy na rzeczywistych danych (MQTT+HTTP)
 }
 
 export interface ResearchPresetDescriptor {
