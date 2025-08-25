@@ -319,8 +319,12 @@ class ResearchRunsController {
         } catch {}
         st = {
           id: req.params.id,
-          startedAt: startedAt || (stat ? stat.mtime.toISOString() : new Date().toISOString()),
-          finishedAt: finishedAt || (stat ? stat.mtime.toISOString() : new Date().toISOString()),
+          startedAt:
+            startedAt ||
+            (stat ? stat.mtime.toISOString() : new Date().toISOString()),
+          finishedAt:
+            finishedAt ||
+            (stat ? stat.mtime.toISOString() : new Date().toISOString()),
           outDir: benchDir,
           config,
           configLabel,
@@ -415,6 +419,7 @@ class ResearchRunsController {
       sampleIndex: idx('sampleIndex'),
       ts: idx('ts'),
       cpu: idx('cpu'),
+      elu: idx('elu'),
       rssMB: idx('rssMB'),
       httpReqRate: idx('httpReqRate'),
       wsMsgRate: idx('wsMsgRate'),
@@ -454,6 +459,7 @@ class ResearchRunsController {
       sess.samples.push({
         ts: parts[col.ts],
         cpu: Number(parts[col.cpu]),
+        elu: Number(parts[col.elu]),
         rssMB: Number(parts[col.rssMB]),
         rate:
           sess.mode === 'polling'
@@ -463,14 +469,13 @@ class ResearchRunsController {
           sess.mode === 'polling'
             ? Number(parts[col.httpBytesRate])
             : Number(parts[col.wsBytesRate]),
-        avgPayloadBytes:
-          (() => {
-            const v =
-              sess.mode === 'polling'
-                ? Number(parts[col.httpAvgBytesPerReq])
-                : Number(parts[col.wsAvgBytesPerMsg]);
-            return Number.isFinite(v) && v > 0 ? v : undefined;
-          })(),
+        avgPayloadBytes: (() => {
+          const v =
+            sess.mode === 'polling'
+              ? Number(parts[col.httpAvgBytesPerReq])
+              : Number(parts[col.wsAvgBytesPerMsg]);
+          return Number.isFinite(v) && v > 0 ? v : undefined;
+        })(),
         jitterMs:
           sess.mode === 'polling'
             ? Number(parts[col.httpJitterMs])

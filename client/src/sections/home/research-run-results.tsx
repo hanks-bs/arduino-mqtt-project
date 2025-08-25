@@ -1,5 +1,6 @@
 "use client";
 import type { ResearchRunStatus } from "@/types";
+import { toNumberFixed } from "@/utils/num";
 import {
 	Alert,
 	Box,
@@ -50,6 +51,7 @@ export default function ResearchRunResults({ run }: Props) {
 		avgPayloadBytes?: number; // payload z API per próbkę (jeśli dostępny)
 		jitterMs: number;
 		freshnessMs: number;
+		elu?: number;
 		cpu?: number;
 		rssMB?: number;
 	}
@@ -83,6 +85,7 @@ export default function ResearchRunResults({ run }: Props) {
 		| "payloadBytes"
 		| "jitterMs"
 		| "freshnessMs"
+		| "elu"
 		| "cpu"
 		| "rssMB";
 	const [metric, setMetric] = useState<MetricKey>("rate");
@@ -394,6 +397,7 @@ export default function ResearchRunResults({ run }: Props) {
 		payloadBytes: "Ładunek (B)",
 		jitterMs: "Jitter (ms)",
 		freshnessMs: "Wiek danych (ms)",
+		elu: "ELU (0–1)",
 		cpu: "CPU (%)",
 		rssMB: "RSS (MB)",
 	};
@@ -407,6 +411,7 @@ export default function ResearchRunResults({ run }: Props) {
 			"Wahania odstępów czasowych między zdarzeniami (niżej=lepiej, stabilniejsze dostarczanie). Pożądany wykres płaski możliwie nisko.",
 		freshnessMs:
 			"Wiek danych (opóźnienie od generacji do użycia); niżej=lepiej. Szukamy niskiej i stabilnej linii.",
+		elu: "Event Loop Utilization (0..1) — udział czasu busy pętli zdarzeń; niżej=lepiej przy podobnym obciążeniu.",
 		cpu: "Średnie zużycie CPU procesu backend (niżej=lepiej przy podobnych metrykach jakości). Wahania wskazują na skoki obciążenia.",
 		rssMB:
 			"Zużycie pamięci RSS (niżej=lepiej/stabilniej). Trend rosnący może sugerować wycieki lub akumulację.",
@@ -429,6 +434,7 @@ export default function ResearchRunResults({ run }: Props) {
 		payloadBytes: "lower", // mniejszy payload przy tym samym znaczeniu
 		jitterMs: "lower",
 		freshnessMs: "lower",
+		elu: "lower",
 		cpu: "lower",
 		rssMB: "lower",
 	};
@@ -533,6 +539,7 @@ export default function ResearchRunResults({ run }: Props) {
 					avgPayloadBytes: directPayload,
 					jitterMs: avgNum(b => b.jitterMs) || 0,
 					freshnessMs: avgNum(b => b.freshnessMs) || 0,
+					elu: avgNum(b => b.elu) || 0,
 					cpu: avgNum(b => b.cpu) || 0,
 					rssMB: avgNum(b => b.rssMB) || 0,
 				});
@@ -566,11 +573,7 @@ export default function ResearchRunResults({ run }: Props) {
 				}
 			}
 		}
-		const formatVal = (v: number | null): number | null => {
-			if (v == null) return null;
-			// Dwa miejsca po przecinku (dla jitter/freshness można 1 ale wymaganie: 2 wszędzie)
-			return Number(v.toFixed(2));
-		};
+		const formatVal = (v: number | null): number | null => toNumberFixed(v, 2);
 		const wsData: (number | null)[] = wsSum.map((s, i) =>
 			wsCnt[i] ? formatVal(s / wsCnt[i]) : null
 		);
@@ -622,7 +625,10 @@ export default function ResearchRunResults({ run }: Props) {
 				(v): v is number => v != null && Number.isFinite(v)
 			);
 			if (!vals.length) return undefined;
-			return Number((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2));
+			return (
+				toNumberFixed(vals.reduce((a, b) => a + b, 0) / vals.length, 2) ??
+				undefined
+			);
 		};
 		const pushAggregate = (
 			m: MetricKey,
@@ -669,6 +675,7 @@ export default function ResearchRunResults({ run }: Props) {
 				"payloadBytes",
 				"jitterMs",
 				"freshnessMs",
+				"elu",
 				"cpu",
 				"rssMB",
 			] as MetricKey[]
@@ -1029,6 +1036,7 @@ export default function ResearchRunResults({ run }: Props) {
 							<MenuItem value='payloadBytes'>Ładunek (B)</MenuItem>
 							<MenuItem value='jitterMs'>Jitter (ms)</MenuItem>
 							<MenuItem value='freshnessMs'>Wiek danych (ms)</MenuItem>
+							<MenuItem value='elu'>ELU (0–1)</MenuItem>
 							<MenuItem value='cpu'>CPU (%)</MenuItem>
 							<MenuItem value='rssMB'>RSS (MB)</MenuItem>
 						</Select>
@@ -1551,6 +1559,40 @@ function KpiSection({
 	const jitter = avgSeries("jitterMs");
 	const fresh = avgSeries("freshnessMs");
 
+	// ELU (jeśli dostępny w danych timeline) – czytamy z opcjonalnego pola 'elu'
+	function avgElu() {
+		const wsGroups = filtered.filter(s => s.mode === "ws").map(s => s.samples);
+		const httpGroups = filtered
+			.filter(s => s.mode === "polling")
+			.map(s => s.samples);
+		const maxLen = Math.max(
+			wsGroups.reduce((m, a) => Math.max(m, a.length), 0),
+			httpGroups.reduce((m, a) => Math.max(m, a.length), 0)
+		);
+		type EluSample = KpiTimelineSessionSample & { elu?: number };
+		const avgFor = (
+			groups: KpiTimelineSessionSample[][]
+		): (number | null)[] => {
+			const out: (number | null)[] = [];
+			for (let i = 0; i < maxLen; i++) {
+				const bucket = groups
+					.map(g => g[i] as EluSample | undefined)
+					.filter((x): x is EluSample => Boolean(x));
+				const vals = bucket
+					.map(b => b.elu as number | undefined)
+					.filter(v => v != null && Number.isFinite(v)) as number[];
+				out.push(
+					vals.length
+						? Number((vals.reduce((a, c) => a + c, 0) / vals.length).toFixed(3))
+						: null
+				);
+			}
+			return out;
+		};
+		return { ws: avgFor(wsGroups), http: avgFor(httpGroups) };
+	}
+	const eluPair = avgElu();
+
 	// Wyrównaj długości do wspólnego minimum dla porównań na wykresach
 	const minLen = Math.min(
 		rate.ws.length,
@@ -1562,7 +1604,9 @@ function KpiSection({
 		jitter.ws.length,
 		jitter.http.length,
 		fresh.ws.length,
-		fresh.http.length
+		fresh.http.length,
+		eluPair.ws.length,
+		eluPair.http.length
 	);
 	const categories = Array.from({ length: minLen }, (_, i) => i + 1);
 	function align(pair: { ws: (number | null)[]; http: (number | null)[] }) {
@@ -1573,6 +1617,7 @@ function KpiSection({
 	const payloadA = align(payload);
 	const jitterA = align(jitter);
 	const freshA = align(fresh);
+	const eluA = align(eluPair);
 
 	// Przekształcenia wg perspektywy:
 	// - server: pokazujemy total WS B/s (sumaryczny egress = bytesRate) oraz HTTP total B/s; rate pozostaje bez zmian
@@ -1774,6 +1819,37 @@ function KpiSection({
 							Jak czytać: niższy jitter = bardziej regularne odstępy; niższa
 							świeżość (staleness) = nowsze dane u odbiorcy. Stabilne, niskie
 							przebiegi świadczą o lepszej jakości dostarczania.
+						</Typography>
+					</Paper>
+				</Grid>
+				<Grid size={{ xs: 12 }}>
+					<Paper sx={{ p: 2 }}>
+						<Typography variant='subtitle2'>
+							Wykorzystanie pętli zdarzeń (ELU)
+						</Typography>
+						<ApexChart
+							type='line'
+							height={260}
+							series={[
+								{ name: "WS ELU", data: eluA.ws },
+								{ name: "HTTP ELU", data: eluA.http },
+							]}
+							options={{
+								chart: { animations: { enabled: false } },
+								xaxis: { categories },
+								yaxis: { title: { text: "ELU (0–1)" }, min: 0, max: 1 },
+								stroke: { width: 2 },
+								legend: { position: "top" },
+								tooltip: { shared: true },
+							}}
+						/>
+						<Typography
+							variant='caption'
+							color='text.secondary'
+							sx={{ display: "block", mt: 1 }}>
+							Jak czytać: ELU blisko 1 oznacza wysokie obciążenie pętli zdarzeń.
+							Niżej=lepiej przy takim samym poziomie jakości (rate, jitter,
+							świeżość).
 						</Typography>
 					</Paper>
 				</Grid>

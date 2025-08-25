@@ -109,7 +109,8 @@ async function runHttpSimulated(cfg: RunCfg): Promise<SessionRecord> {
   try {
     ResourceMonitor.noteArduinoPayloadSize(payloadBytes as number);
   } catch {}
-  const clients = cfg.clientsHttp == null ? 1 : Math.max(0, Math.floor(cfg.clientsHttp));
+  const clients =
+    cfg.clientsHttp == null ? 1 : Math.max(0, Math.floor(cfg.clientsHttp));
   const rec = ResourceMonitor.startSession({
     label,
     mode: 'polling',
@@ -890,34 +891,34 @@ export async function runMeasurements(
           new Set([...wsClientsList, ...httpClientsList]),
         );
         for (const c of clientUnion) {
-      if (MODES.includes('ws') && wsClientsList.includes(c)) {
+          if (MODES.includes('ws') && wsClientsList.includes(c)) {
             runs.push({
-        label: `WS@${hz}Hz${wsPayload != null ? ` payload=${wsPayload}B` : ''}${loadLabel}${c ? ` cWs=${c}` : ''}${opts.realData ? ' realData' : ''}`,
+              label: `WS@${hz}Hz${wsPayload != null ? ` payload=${wsPayload}B` : ''}${loadLabel}${c ? ` cWs=${c}` : ''}${opts.realData ? ' realData' : ''}`,
               mode: 'ws',
               hz,
               durationSec,
-        payloadBytes: wsPayload,
+              payloadBytes: wsPayload,
               loadCpuPct: lp || undefined,
               loadWorkers: lp ? CLI_WORKERS : undefined,
               clientsWs: c || undefined,
               warmupSec: warmupSec || undefined,
               cooldownSec: cooldownSec || undefined,
-        realData: opts.realData || undefined,
+              realData: opts.realData || undefined,
             });
           }
           if (MODES.includes('polling') && httpClientsList.includes(c)) {
             runs.push({
-        label: `HTTP@${hz}Hz${httpPayload != null ? ` payload=${httpPayload}B` : ''}${loadLabel}${c ? ` cHttp=${c}` : ''}${opts.realData ? ' realData' : ''}`,
+              label: `HTTP@${hz}Hz${httpPayload != null ? ` payload=${httpPayload}B` : ''}${loadLabel}${c ? ` cHttp=${c}` : ''}${opts.realData ? ' realData' : ''}`,
               mode: 'polling',
               hz,
               durationSec,
-        payloadBytes: httpPayload,
+              payloadBytes: httpPayload,
               loadCpuPct: lp || undefined,
               loadWorkers: lp ? CLI_WORKERS : undefined,
               clientsHttp: c || undefined,
               warmupSec: warmupSec || undefined,
               cooldownSec: cooldownSec || undefined,
-        realData: opts.realData || undefined,
+              realData: opts.realData || undefined,
             });
           }
         }
@@ -927,17 +928,17 @@ export async function runMeasurements(
         for (const hz of HZ_SET) {
           for (const cWs of wsClientsList) {
             runs.push({
-        label: `WS@${hz}Hz${wsPayload != null ? ` payload=${wsPayload}B` : ''}${loadLabel}${cWs ? ` cWs=${cWs}` : ''}${opts.realData ? ' realData' : ''}`,
+              label: `WS@${hz}Hz${wsPayload != null ? ` payload=${wsPayload}B` : ''}${loadLabel}${cWs ? ` cWs=${cWs}` : ''}${opts.realData ? ' realData' : ''}`,
               mode: 'ws',
               hz,
               durationSec,
-        payloadBytes: wsPayload,
+              payloadBytes: wsPayload,
               loadCpuPct: lp || undefined,
               loadWorkers: lp ? CLI_WORKERS : undefined,
               clientsWs: cWs || undefined,
               warmupSec: warmupSec || undefined,
               cooldownSec: cooldownSec || undefined,
-        realData: opts.realData || undefined,
+              realData: opts.realData || undefined,
             });
           }
         }
@@ -946,17 +947,17 @@ export async function runMeasurements(
         for (const hz of HZ_SET) {
           for (const cHttp of httpClientsList) {
             runs.push({
-        label: `HTTP@${hz}Hz${httpPayload != null ? ` payload=${httpPayload}B` : ''}${loadLabel}${cHttp ? ` cHttp=${cHttp}` : ''}${opts.realData ? ' realData' : ''}`,
+              label: `HTTP@${hz}Hz${httpPayload != null ? ` payload=${httpPayload}B` : ''}${loadLabel}${cHttp ? ` cHttp=${cHttp}` : ''}${opts.realData ? ' realData' : ''}`,
               mode: 'polling',
               hz,
               durationSec,
-        payloadBytes: httpPayload,
+              payloadBytes: httpPayload,
               loadCpuPct: lp || undefined,
               loadWorkers: lp ? CLI_WORKERS : undefined,
               clientsHttp: cHttp || undefined,
               warmupSec: warmupSec || undefined,
               cooldownSec: cooldownSec || undefined,
-        realData: opts.realData || undefined,
+              realData: opts.realData || undefined,
             });
           }
         }
@@ -1091,9 +1092,9 @@ export async function runMeasurements(
     monitorTickMs: Number(process.env.MONITOR_TICK_MS || '1000'),
     clientsHttp: CH_SET.length ? CH_SET[0] : CLIENTS_HTTP_SINGLE,
     clientsWs: CW_SET.length ? CW_SET[0] : CLIENTS_WS_SINGLE,
-  wsPayload,
-  httpPayload,
-  realData: !!opts.realData,
+    wsPayload,
+    httpPayload,
+    realData: !!opts.realData,
     warmupSec,
     cooldownSec,
     repeats,
@@ -1126,7 +1127,9 @@ export async function runMeasurements(
       const ts = sessions
         .map(s => new Date(s.startedAt).getTime())
         .filter(t => Number.isFinite(t));
-      return ts.length ? new Date(Math.min(...ts)).toISOString() : new Date().toISOString();
+      return ts.length
+        ? new Date(Math.min(...ts)).toISOString()
+        : new Date().toISOString();
     } catch {
       return new Date().toISOString();
     }
