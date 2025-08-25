@@ -394,7 +394,9 @@ function summarizeSession(s: SessionRecord) {
       ? clients > 0
         ? avgBytesRate / clients
         : undefined
-      : avgRate * (avgPayload || 0); // WS: per-client = Rate × Payload (klient dostaje pełny ładunek)
+      : clients > 0
+        ? avgBytesRate / clients  // WS: per-client = Bytes/s / N (each client gets Rate × Payload)
+        : avgRate * (avgPayload || 0); // WS with N=0: use Rate × avgPayload (avgPayload not scaled by N when N=0)
   return {
     id: s.id,
     label: s.config.label,
