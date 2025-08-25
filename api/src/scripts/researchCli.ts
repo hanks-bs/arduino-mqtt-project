@@ -21,6 +21,9 @@ type Preset =
   | 'compare-load'
   | 'stress'
   | 'latency'
+  | 'contrast'
+  | 'contrast-small'
+  | 'contrast-highhz'
   | 'all';
 
 function printHelp() {
@@ -68,6 +71,18 @@ function printHelp() {
     [
       'latency',
       '60s×2, 1 Hz, Load=0,50; clients=1,25; pair + wydłużony tick=150ms (lepsza rozdz. ingest/emit)',
+    ],
+    [
+      'contrast',
+      '30s×2, Hz=1,2,4; Load=0,50; clients=1,10,50; pair (wysoki kontrast WS vs HTTP: jitter/staleness i koszty sieci)',
+    ],
+    [
+      'contrast-small',
+      '30s×2, Hz=1,2,4; Load=0,50; clients=1,10,50; payload≈120B; pair (podkreśla narzut nagłówków HTTP przy małym payloadzie)',
+    ],
+    [
+      'contrast-highhz',
+      '40s×2, Hz=4,8; Load=0,25; clients=1,10,50; pair (wysokie częstotliwości: pogłębia różnice jitter/staleness i nagłówków)',
     ],
     [
       'all',
@@ -291,6 +306,58 @@ async function main() {
         cooldownSec: 5,
         clientsHttpSet: [1, 25],
         clientsWsSet: [1, 25],
+        repeats: 2,
+        pair: true,
+        // @ts-expect-error
+        cpuSampleMs: 750,
+      });
+      break;
+    case 'contrast':
+      await runMeasurements({
+        modes: ['ws', 'polling'],
+        hzSet: [1, 2, 4],
+        loadSet: [0, 50],
+        durationSec: 30,
+        tickMs: 200,
+        warmupSec: 2,
+        cooldownSec: 2,
+        clientsHttpSet: [1, 10, 50],
+        clientsWsSet: [1, 10, 50],
+        repeats: 2,
+        pair: true,
+        // @ts-expect-error
+        cpuSampleMs: 1000,
+      });
+      break;
+    case 'contrast-small':
+      await runMeasurements({
+        modes: ['ws', 'polling'],
+        hzSet: [1, 2, 4],
+        loadSet: [0, 50],
+        durationSec: 30,
+        tickMs: 200,
+        warmupSec: 2,
+        cooldownSec: 2,
+        clientsHttpSet: [1, 10, 50],
+        clientsWsSet: [1, 10, 50],
+        repeats: 2,
+        pair: true,
+        payload: 120,
+        // @ts-expect-error
+        cpuSampleMs: 1000,
+      });
+      break;
+    case 'contrast-highhz':
+      await runMeasurements({
+        modes: ['ws', 'polling'],
+        hzSet: [4, 8],
+        loadSet: [0, 25],
+        durationSec: 40,
+        tickMs: 200,
+        warmupSec: 3,
+        cooldownSec: 3,
+        clientsHttpSet: [1, 10, 50],
+        clientsWsSet: [1, 10, 50],
         repeats: 2,
         pair: true,
         // @ts-expect-error

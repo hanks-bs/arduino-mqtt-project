@@ -33,8 +33,71 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5000";
 // Kuracja presetów – tylko kluczowe zestawy różnicujące protokoły
 const PRESETS: ResearchPresetDescriptor[] = [
 	{
+		key: "contrast",
+		label: "Kontrast",
+		description:
+			"30s×2: Hz=1,2,4; Obc.=0/50; klienci 1/10/50 — wysoki kontrast WS vs HTTP",
+		config: {
+			modes: ["ws", "polling"],
+			hzSet: [1, 2, 4],
+			loadSet: [0, 50],
+			durationSec: 30,
+			tickMs: 200,
+			warmupSec: 2,
+			cooldownSec: 2,
+			clientsHttpSet: [1, 10, 50],
+			clientsWsSet: [1, 10, 50],
+			repeats: 2,
+			pair: true,
+			cpuSampleMs: 1000,
+		},
+	},
+	{
+		key: "contrast-small",
+		label: "Kontrast (mały ładunek)",
+		description:
+			"30s×2: Hz=1,2,4; Obc.=0/50; klienci 1/10/50; payload≈120B (eksponuje narzut HTTP)",
+		config: {
+			modes: ["ws", "polling"],
+			hzSet: [1, 2, 4],
+			loadSet: [0, 50],
+			durationSec: 30,
+			tickMs: 200,
+			warmupSec: 2,
+			cooldownSec: 2,
+			clientsHttpSet: [1, 10, 50],
+			clientsWsSet: [1, 10, 50],
+			repeats: 2,
+			pair: true,
+			cpuSampleMs: 1000,
+			// Zmniejsz payload, by uwydatnić narzut HTTP (nagłówki)
+			payloadWs: 120,
+			payloadHttp: 120,
+		},
+	},
+	{
+		key: "contrast-highhz",
+		label: "Kontrast (4–8 Hz)",
+		description:
+			"40s×2: Hz=4,8; Obc.=0/25; klienci 1/10/50 — różnice jitter/wieku danych",
+		config: {
+			modes: ["ws", "polling"],
+			hzSet: [4, 8],
+			loadSet: [0, 25],
+			durationSec: 40,
+			tickMs: 200,
+			warmupSec: 3,
+			cooldownSec: 3,
+			clientsHttpSet: [1, 10, 50],
+			clientsWsSet: [1, 10, 50],
+			repeats: 2,
+			pair: true,
+			cpuSampleMs: 750,
+		},
+	},
+	{
 		key: "quick",
-		label: "Quick 4s",
+		label: "Szybki 4s",
 		description: "Szybka kontrola: 4s @Hz=1,2",
 		config: {
 			modes: ["ws", "polling"],
@@ -49,7 +112,7 @@ const PRESETS: ResearchPresetDescriptor[] = [
 	},
 	{
 		key: "baseline",
-		label: "Baseline",
+		label: "Bazowy",
 		description: "Stabilny punkt: 40s×2 @1Hz",
 		config: {
 			modes: ["ws", "polling"],
@@ -68,8 +131,8 @@ const PRESETS: ResearchPresetDescriptor[] = [
 	},
 	{
 		key: "freq",
-		label: "Frequencies",
-		description: "30s×2: 0.5–4Hz wpływ częstotliwości",
+		label: "Częstotliwości",
+		description: "30s×2: 0.5–4Hz – wpływ częstotliwości",
 		config: {
 			modes: ["ws", "polling"],
 			hzSet: [0.5, 1, 2, 4],
@@ -87,7 +150,7 @@ const PRESETS: ResearchPresetDescriptor[] = [
 	},
 	{
 		key: "clients",
-		label: "Clients Scale",
+		label: "Skalowanie klientów",
 		description: "60s×2: klienci 1–50 @1Hz",
 		config: {
 			modes: ["ws", "polling"],
@@ -106,8 +169,8 @@ const PRESETS: ResearchPresetDescriptor[] = [
 	},
 	{
 		key: "compare-load",
-		label: "Load Levels",
-		description: "40s×2: load 0–75% @1Hz",
+		label: "Poziomy obciążenia",
+		description: "40s×2: obciążenie 0–75% @1Hz",
 		config: {
 			modes: ["ws", "polling"],
 			hzSet: [1],
@@ -125,8 +188,8 @@ const PRESETS: ResearchPresetDescriptor[] = [
 	},
 	{
 		key: "latency",
-		label: "Latency Focus",
-		description: "60s×2: load 0/50, tick=150ms",
+		label: "Fokus na latencję",
+		description: "60s×2: obciążenie 0/50, tick=150ms",
 		config: {
 			modes: ["ws", "polling"],
 			hzSet: [1],
@@ -144,8 +207,8 @@ const PRESETS: ResearchPresetDescriptor[] = [
 	},
 	{
 		key: "stress",
-		label: "Stress Mix",
-		description: "50s: Hz=2–8, load 0–75%",
+		label: "Miks stresowy",
+		description: "50s: Hz=2–8, obciążenie 0–75%",
 		config: {
 			modes: ["ws", "polling"],
 			hzSet: [2, 4, 8],
@@ -163,7 +226,7 @@ const PRESETS: ResearchPresetDescriptor[] = [
 	},
 	{
 		key: "clients-wide",
-		label: "Wide Scale",
+		label: "Szeroka skala",
 		description: "45s: klienci 1–100",
 		config: {
 			modes: ["ws", "polling"],
@@ -247,15 +310,19 @@ export default function ResearchRunPanel() {
 	const [expectations, setExpectations] = useState<Record<string, number>>({});
 	const pollRef = useRef<number | null>(null);
 	// Nowy stan: bieżący status aktywnego runu (nie modyfikuje listy historii)
-	const [activeStatus, setActiveStatus] = useState<ResearchRunStatus | null>(null);
+	const [activeStatus, setActiveStatus] = useState<ResearchRunStatus | null>(
+		null
+	);
 	// Zapamiętuj czy run uruchomiony z UI miał Real Data (na potrzeby wyświetlania w trakcie trwania)
-	const [startedRealData, setStartedRealData] = useState<Record<string, boolean>>({});
+	const [startedRealData, setStartedRealData] = useState<
+		Record<string, boolean>
+	>({});
 
 	// Preferuj status z aktywnego pollingu, a w drugiej kolejności z listy (jednorazowo po załadowaniu)
 	const activeRun = activeStatus || runs.find(r => !r.finishedAt);
-	const currentStatus = activeRun || (currentRunId
-		? runs.find(r => r.id === currentRunId) || null
-		: null);
+	const currentStatus =
+		activeRun ||
+		(currentRunId ? runs.find(r => r.id === currentRunId) || null : null);
 
 	const selectedRun = selectedRunId
 		? runs.find(r => r.id === selectedRunId) || null
@@ -267,7 +334,10 @@ export default function ResearchRunPanel() {
 			const json = await res.json();
 			if (json.success) setRuns(json.data || []);
 			// po pełnym reloadzie ustaw ewentualny aktywny status (bez dalszego odświeżania historii)
-			const ar = (json.success ? json.data : [])?.find((r: ResearchRunStatus) => !r.finishedAt) || null;
+			const ar =
+				(json.success ? json.data : [])?.find(
+					(r: ResearchRunStatus) => !r.finishedAt
+				) || null;
 			setActiveStatus(ar || null);
 		} catch (e) {
 			console.error("[research-panel] list error", e);
@@ -294,7 +364,8 @@ export default function ResearchRunPanel() {
 					const res = await fetch(`${API_BASE}/api/research/runs`);
 					const json = await res.json();
 					if (json.success) {
-						const ar = json.data?.find((r: ResearchRunStatus) => !r.finishedAt) || null;
+						const ar =
+							json.data?.find((r: ResearchRunStatus) => !r.finishedAt) || null;
 						if (ar) {
 							setActiveStatus(ar);
 						} else {
@@ -357,7 +428,10 @@ export default function ResearchRunPanel() {
 				if (expected)
 					setExpectations(e => ({ ...e, [json.data.runId]: expected }));
 				// zapamiętaj tryb realData dla tego runu (lokalnie, dopóki backend nie zwróci flag)
-				setStartedRealData(m => ({ ...m, [json.data.runId]: !!requestBody.realData }));
+				setStartedRealData(m => ({
+					...m,
+					[json.data.runId]: !!requestBody.realData,
+				}));
 				reload();
 			}
 		} catch (e) {
@@ -472,86 +546,102 @@ export default function ResearchRunPanel() {
 									const per = dur + warm + cool;
 									const est = scen ? Math.round(per * scen) : undefined;
 									return (
-										<Paper
+										<Tooltip
 											key={p.key}
-											tabIndex={0}
-											role='option'
-											aria-selected={selected}
-											onClick={() => !disabled && setPresetKey(p.key)}
-											onKeyDown={e => {
-												if (e.key === "Enter" || e.key === " ") {
-													e.preventDefault();
-													if (!disabled) setPresetKey(p.key);
-												}
-											}}
-											sx={{
-												p: 1,
-												minWidth: 170,
-												cursor: disabled ? "not-allowed" : "pointer",
-												border: theme =>
-													`2px solid ${
-														selected
-															? theme.palette.primary.main
-															: "transparent"
-													}`,
-												bgcolor: selected
-													? "primary.light"
-													: "background.paper",
-												opacity: disabled ? 0.6 : 1,
-												transition: "background-color .2s, border-color .2s",
-												"&:focus-visible": {
-													outline: theme =>
-														`2px solid ${theme.palette.primary.main}`,
-													outlineOffset: 2,
-												},
-											}}>
-											<Typography variant='subtitle2' sx={{ lineHeight: 1.1 }}>
-												{p.label}
-											</Typography>
-											<Typography
-												variant='caption'
-												color='text.secondary'
-												sx={{ display: "block", mb: 0.5 }}>
-												{p.description}
-											</Typography>
-											<Stack direction='row' spacing={0.5} flexWrap='wrap'>
-												{cfg.hzSet && (
-													<Chip
-														size='small'
-														label={`Hz:${cfg.hzSet.join("/")}`}
-													/>
-												)}
-												{cfg.loadSet && cfg.loadSet.length > 1 && (
-													<Chip
-														size='small'
-														label={`Load:${cfg.loadSet.length}`}
-													/>
-												)}
-												{(cfg.clientsHttpSet || cfg.clientsWsSet) && (
-													<Chip
-														size='small'
-														label={`Cli:${Math.max(
-															cfg.clientsHttpSet?.length || 0,
-															cfg.clientsWsSet?.length || 0
-														)}`}
-													/>
-												)}
-												{scen && (
-													<Chip
-														size='small'
-														variant='outlined'
-														label={`Scen:${scen}`}
-													/>
-												)}
-												{est && (
-													<Chip
-														size='small'
-														variant='outlined'
-														label={`~${est}s`}
-													/>
-												)}
-											</Stack>
-										</Paper>
+											title={
+												p.key === "contrast"
+													? "Zestaw o wysokim kontraście: pokazuje różnice WS vs HTTP w tempie, koszcie sieci i stabilności."
+													: p.key === "contrast-small"
+													? "Mały ładunek (~120B): eksponuje narzut nagłówków HTTP oraz efektywność WS przy broadcast."
+													: p.key === "contrast-highhz"
+													? "Wyższe częstotliwości (4–8Hz): uwidaczniają różnice w jitterze i wieku danych."
+													: p.description || ""
+											}
+											placement='top'
+											enterDelay={400}
+											arrow>
+											<Paper
+												tabIndex={0}
+												role='option'
+												aria-selected={selected}
+												onClick={() => !disabled && setPresetKey(p.key)}
+												onKeyDown={e => {
+													if (e.key === "Enter" || e.key === " ") {
+														e.preventDefault();
+														if (!disabled) setPresetKey(p.key);
+													}
+												}}
+												sx={{
+													p: 1,
+													minWidth: 170,
+													cursor: disabled ? "not-allowed" : "pointer",
+													border: theme =>
+														`2px solid ${
+															selected
+																? theme.palette.primary.main
+																: "transparent"
+														}`,
+													bgcolor: selected
+														? "primary.light"
+														: "background.paper",
+													opacity: disabled ? 0.6 : 1,
+													transition: "background-color .2s, border-color .2s",
+													"&:focus-visible": {
+														outline: theme =>
+															`2px solid ${theme.palette.primary.main}`,
+														outlineOffset: 2,
+													},
+												}}>
+												<Typography
+													variant='subtitle2'
+													sx={{ lineHeight: 1.1 }}>
+													{p.label}
+												</Typography>
+												<Typography
+													variant='caption'
+													color='text.secondary'
+													sx={{ display: "block", mb: 0.5 }}>
+													{p.description}
+												</Typography>
+												<Stack direction='row' spacing={0.5} flexWrap='wrap'>
+													{cfg.hzSet && (
+														<Chip
+															size='small'
+															label={`Hz:${cfg.hzSet.join("/")}`}
+														/>
+													)}
+													{cfg.loadSet && cfg.loadSet.length > 1 && (
+														<Chip
+															size='small'
+															label={`Obc.:${cfg.loadSet.length}`}
+														/>
+													)}
+													{(cfg.clientsHttpSet || cfg.clientsWsSet) && (
+														<Chip
+															size='small'
+															label={`Klienci:${Math.max(
+																cfg.clientsHttpSet?.length || 0,
+																cfg.clientsWsSet?.length || 0
+															)}`}
+														/>
+													)}
+													{scen && (
+														<Chip
+															size='small'
+															variant='outlined'
+															label={`Scen.:${scen}`}
+														/>
+													)}
+													{est && (
+														<Chip
+															size='small'
+															variant='outlined'
+															label={`~${est}s`}
+														/>
+													)}
+												</Stack>
+											</Paper>
+										</Tooltip>
 									);
 								})}
 								<Paper
@@ -581,7 +671,7 @@ export default function ResearchRunPanel() {
 												? "primary.light"
 												: "background.paper",
 									}}>
-									<Typography variant='subtitle2'>Custom…</Typography>
+									<Typography variant='subtitle2'>Własny…</Typography>
 									<Typography variant='caption' color='text.secondary'>
 										Własne parametry
 									</Typography>
@@ -610,26 +700,31 @@ export default function ResearchRunPanel() {
 								{requestBody.loadSet && (
 									<Chip
 										size='small'
-										label={`Load: ${requestBody.loadSet.join(",")}`}
+										label={`Obc.: ${requestBody.loadSet.join(",")}`}
 									/>
 								)}
 								{requestBody.clientsHttpSet && (
 									<Chip
 										size='small'
-										label={`HTTP cli: ${requestBody.clientsHttpSet.join(",")}`}
+										label={`HTTP klienci: ${requestBody.clientsHttpSet.join(
+											","
+										)}`}
 									/>
 								)}
 								{requestBody.clientsWsSet && (
 									<Chip
 										size='small'
-										label={`WS cli: ${requestBody.clientsWsSet.join(",")}`}
+										label={`WS klienci: ${requestBody.clientsWsSet.join(",")}`}
 									/>
 								)}
 								{requestBody.durationSec && (
 									<Chip size='small' label={`${requestBody.durationSec}s`} />
 								)}
 								{requestBody.repeats && requestBody.repeats > 1 && (
-									<Chip size='small' label={`repeats=${requestBody.repeats}`} />
+									<Chip
+										size='small'
+										label={`powtórzenia=${requestBody.repeats}`}
+									/>
 								)}
 								{requestBody.pair && <Chip size='small' label='parowanie' />}
 								{effectiveRealData && (
@@ -681,7 +776,7 @@ export default function ResearchRunPanel() {
 								variant='outlined'
 								onClick={abortRun}
 								disabled={activeRun.aborting}>
-								Abort
+								Przerwij
 							</Button>
 						)}
 					</Grid>
@@ -722,7 +817,7 @@ export default function ResearchRunPanel() {
 							</Grid>
 							<Grid size={{ xs: 12, md: 4 }}>
 								<TextField
-									label='Modes (csv)'
+									label='Tryby (csv)'
 									size='small'
 									fullWidth
 									placeholder='ws,polling'
@@ -742,7 +837,7 @@ export default function ResearchRunPanel() {
 							</Grid>
 							<Grid size={{ xs: 12, md: 4 }}>
 								<TextField
-									label='Hz set'
+									label='Zestaw Hz'
 									size='small'
 									fullWidth
 									placeholder='1,2'
@@ -756,7 +851,7 @@ export default function ResearchRunPanel() {
 							</Grid>
 							<Grid size={{ xs: 12, md: 4 }}>
 								<TextField
-									label='Load set (%)'
+									label='Zestaw obciążenia (%)'
 									size='small'
 									fullWidth
 									placeholder='0,25,50'
@@ -770,7 +865,7 @@ export default function ResearchRunPanel() {
 							</Grid>
 							<Grid size={{ xs: 6, md: 3 }}>
 								<TextField
-									label='Duration (s)'
+									label='Czas trwania (s)'
 									size='small'
 									type='number'
 									fullWidth
@@ -784,7 +879,7 @@ export default function ResearchRunPanel() {
 							</Grid>
 							<Grid size={{ xs: 6, md: 3 }}>
 								<TextField
-									label='Tick (ms)'
+									label='Próbkowanie (ms)'
 									size='small'
 									type='number'
 									fullWidth
@@ -798,7 +893,7 @@ export default function ResearchRunPanel() {
 							</Grid>
 							<Grid size={{ xs: 6, md: 3 }}>
 								<TextField
-									label='Warmup (s)'
+									label='Rozgrzewka (s)'
 									size='small'
 									type='number'
 									fullWidth
@@ -812,7 +907,7 @@ export default function ResearchRunPanel() {
 							</Grid>
 							<Grid size={{ xs: 6, md: 3 }}>
 								<TextField
-									label='Cooldown (s)'
+									label='Chłodzenie (s)'
 									size='small'
 									type='number'
 									fullWidth
@@ -826,7 +921,7 @@ export default function ResearchRunPanel() {
 							</Grid>
 							<Grid size={{ xs: 6, md: 3 }}>
 								<TextField
-									label='Repeats'
+									label='Powtórzenia'
 									size='small'
 									type='number'
 									fullWidth
@@ -852,8 +947,8 @@ export default function ResearchRunPanel() {
 							</Grid>
 							<Grid size={{ xs: 6, md: 3 }}>
 								<TextField
-									label='HTTP clients'
-								size='small'
+									label='Klienci HTTP'
+									size='small'
 									type='number'
 									fullWidth
 									onChange={e =>
@@ -866,7 +961,7 @@ export default function ResearchRunPanel() {
 							</Grid>
 							<Grid size={{ xs: 6, md: 3 }}>
 								<TextField
-									label='WS clients'
+									label='Klienci WS'
 									size='small'
 									type='number'
 									fullWidth
@@ -880,7 +975,7 @@ export default function ResearchRunPanel() {
 							</Grid>
 							<Grid size={{ xs: 12, md: 6 }}>
 								<TextField
-									label='HTTP clients set'
+									label='Zestaw klientów HTTP'
 									size='small'
 									fullWidth
 									placeholder='1,10,25'
@@ -894,7 +989,7 @@ export default function ResearchRunPanel() {
 							</Grid>
 							<Grid size={{ xs: 12, md: 6 }}>
 								<TextField
-									label='WS clients set'
+									label='Zestaw klientów WS'
 									size='small'
 									fullWidth
 									placeholder='1,10,25'
@@ -940,7 +1035,7 @@ export default function ResearchRunPanel() {
 							)}
 							<Grid size={{ xs: 6, md: 3 }}>
 								<TextField
-									label='CPU sample (ms)'
+									label='Próbkowanie CPU (ms)'
 									size='small'
 									type='number'
 									fullWidth
@@ -1013,9 +1108,12 @@ export default function ResearchRunPanel() {
 															realData?: boolean;
 														}
 														const f = (r.flags || {}) as F;
-														const isReal = f.realData || (!r.finishedAt && startedRealData[r.id]);
+														const isReal =
+															f.realData ||
+															(!r.finishedAt && startedRealData[r.id]);
 														return isReal ? (
-															<span style={{ color: "#6a1b9a", fontWeight: 500 }}>
+															<span
+																style={{ color: "#6a1b9a", fontWeight: 500 }}>
 																REAL
 															</span>
 														) : (
@@ -1027,7 +1125,9 @@ export default function ResearchRunPanel() {
 													{new Date(r.startedAt).toLocaleTimeString()}
 												</td>
 												<td style={{ padding: 4 }}>
-													{done ? new Date(r.finishedAt!).toLocaleTimeString() : "—"}
+													{done
+														? new Date(r.finishedAt!).toLocaleTimeString()
+														: "—"}
 												</td>
 												<td
 													style={{

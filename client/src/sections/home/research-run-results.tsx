@@ -41,12 +41,13 @@ export default function ResearchRunResults({ run }: Props) {
 		realData?: boolean;
 	}
 	const flags = (run?.flags || {}) as RunFlags;
+
 	interface TimelineSessionSample {
 		tSec: number;
 		rate: number;
 		bytesRate: number;
 		payloadBytes?: number; // średni payload (B) wyliczony lokalnie
-		avgPayloadBytes?: number; // nowo: payload z API per próbkę (jeśli dostępny)
+		avgPayloadBytes?: number; // payload z API per próbkę (jeśli dostępny)
 		jitterMs: number;
 		freshnessMs: number;
 		cpu?: number;
@@ -63,7 +64,10 @@ export default function ResearchRunResults({ run }: Props) {
 		payloadBytes?: number;
 		samples: TimelineSessionSample[];
 	}
+
+	// Stan sesji (wczytywany z API)
 	const [sessions, setSessions] = useState<TimelineSession[] | null>(null);
+
 	// Hooks (musi być blisko początku komponentu – przed wczesnymi returnami)
 	const theme = useTheme();
 	const compact = useMediaQuery(theme.breakpoints.down("sm"));
@@ -82,7 +86,9 @@ export default function ResearchRunResults({ run }: Props) {
 		| "cpu"
 		| "rssMB";
 	const [metric, setMetric] = useState<MetricKey>("rate");
-	const [viewMode, setViewMode] = useState<"timeline" | "summary">("timeline");
+	const [viewMode, setViewMode] = useState<"timeline" | "summary" | "kpis">(
+		"timeline"
+	);
 
 	// Stan dialogu payloadu + szczegóły
 	const [payloadOpen, setPayloadOpen] = useState(false);
@@ -133,23 +139,38 @@ export default function ResearchRunResults({ run }: Props) {
 							String(s.clients ?? 0),
 							String(s.payloadBytes ?? "—"),
 					  ].join("|") === configKey
-					: true,
-				);
+					: true
+			);
 		if (!filtered.length) return null;
 		// Grupowanie jak w timeline – ale licz tylko payloadBytes
-		type GroupKey = `${"ws" | "polling"}|${number | undefined}|${number | undefined}|${number | undefined}|${number | undefined}`;
-		const map = new Map<GroupKey, { key: GroupKey; mode: "ws" | "polling"; samples: TimelineSessionSample[][] }>();
+		type GroupKey = string;
+		const map = new Map<
+			GroupKey,
+			{
+				key: GroupKey;
+				mode: "ws" | "polling";
+				samples: TimelineSessionSample[][];
+			}
+		>();
 		for (const s of filtered) {
-			const key = [s.mode, s.hz, s.loadPct, s.clients, s.payloadBytes].join("|") as GroupKey;
+			const key = [s.mode, s.hz, s.loadPct, s.clients, s.payloadBytes].join(
+				"|"
+			) as GroupKey;
 			if (!map.has(key)) map.set(key, { key, mode: s.mode, samples: [] });
 			map.get(key)!.samples.push(s.samples);
 		}
-		const grouped: { key: GroupKey; mode: "ws" | "polling"; samples: number[] }[] = [];
+		const grouped: {
+			key: GroupKey;
+			mode: "ws" | "polling";
+			samples: number[];
+		}[] = [];
 		for (const g of map.values()) {
 			const maxLen = g.samples.reduce((m, arr) => Math.max(m, arr.length), 0);
 			const merged: number[] = [];
 			for (let i = 0; i < maxLen; i++) {
-				const bucket = g.samples.map(arr => arr[i]).filter(Boolean) as TimelineSessionSample[];
+				const bucket = g.samples
+					.map(arr => arr[i])
+					.filter(Boolean) as TimelineSessionSample[];
 				if (!bucket.length) continue;
 				// Średnia payloadu per próbka z preferencją avgPayloadBytes
 				const vals: number[] = [];
@@ -159,20 +180,34 @@ export default function ResearchRunResults({ run }: Props) {
 						if (b.rate > 0) {
 							const parts = g.key.split("|");
 							const clients = g.mode === "ws" ? Number(parts[3] || 0) || 0 : 0;
-							v = g.mode === "polling" ? b.bytesRate / b.rate : clients > 0 ? b.bytesRate / (b.rate * clients) : b.bytesRate / b.rate;
+							v =
+								g.mode === "polling"
+									? b.bytesRate / b.rate
+									: clients > 0
+									? b.bytesRate / (b.rate * clients)
+									: b.bytesRate / b.rate;
 						}
 					}
 					if (Number.isFinite(v) && (v as number) > 0) vals.push(v as number);
 				}
-				merged.push(vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : NaN);
+				merged.push(
+					vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : NaN
+				);
 			}
 			grouped.push({ key: g.key, mode: g.mode, samples: merged });
 		}
 		const ws = grouped.find(g => g.mode === "ws")?.samples || [];
 		const http = grouped.find(g => g.mode === "polling")?.samples || [];
 		const minLen = Math.min(ws.length || 0, http.length || 0);
-		if (!minLen) return { wsAligned: ws, httpAligned: http } as { wsAligned: number[]; httpAligned: number[] };
-		return { wsAligned: ws.slice(0, minLen), httpAligned: http.slice(0, minLen) } as { wsAligned: number[]; httpAligned: number[] };
+		if (!minLen)
+			return { wsAligned: ws, httpAligned: http } as {
+				wsAligned: number[];
+				httpAligned: number[];
+			};
+		return {
+			wsAligned: ws.slice(0, minLen),
+			httpAligned: http.slice(0, minLen),
+		} as { wsAligned: number[]; httpAligned: number[] };
 	}
 
 	async function openPayloadDialog() {
@@ -188,23 +223,36 @@ export default function ResearchRunResults({ run }: Props) {
 		try {
 			const aligned = computeAlignedPayloadSeries();
 			if (aligned) {
-				const { wsAligned, httpAligned } = aligned as { wsAligned: number[]; httpAligned: number[] };
-				const findFirst = (arr: number[]): { v: number | undefined; i: number | undefined } => {
-					for (let i = 0; i < arr.length; i++) if (Number.isFinite(arr[i])) return { v: arr[i], i: i + 1 };
+				const { wsAligned, httpAligned } = aligned as {
+					wsAligned: number[];
+					httpAligned: number[];
+				};
+				const findFirst = (
+					arr: number[]
+				): { v: number | undefined; i: number | undefined } => {
+					for (let i = 0; i < arr.length; i++)
+						if (Number.isFinite(arr[i])) return { v: arr[i], i: i + 1 };
 					return { v: undefined, i: undefined };
 				};
-				const findLast = (arr: number[]): { v: number | undefined; i: number | undefined } => {
-					for (let i = arr.length - 1; i >= 0; i--) if (Number.isFinite(arr[i])) return { v: arr[i], i: i + 1 };
+				const findLast = (
+					arr: number[]
+				): { v: number | undefined; i: number | undefined } => {
+					for (let i = arr.length - 1; i >= 0; i--)
+						if (Number.isFinite(arr[i])) return { v: arr[i], i: i + 1 };
 					return { v: undefined, i: undefined };
 				};
 				const fws = findFirst(wsAligned || []);
 				const fhttp = findFirst(httpAligned || []);
 				const lws = findLast(wsAligned || []);
 				const lhttp = findLast(httpAligned || []);
-				firstWs = fws.v; firstWsTick = fws.i;
-				firstHttp = fhttp.v; firstHttpTick = fhttp.i;
-				lastWs = lws.v; lastWsTick = lws.i;
-				lastHttp = lhttp.v; lastHttpTick = lhttp.i;
+				firstWs = fws.v;
+				firstWsTick = fws.i;
+				firstHttp = fhttp.v;
+				firstHttpTick = fhttp.i;
+				lastWs = lws.v;
+				lastWsTick = lws.i;
+				lastHttp = lhttp.v;
+				lastHttpTick = lhttp.i;
 			}
 		} catch {}
 		// Pobierz aktualny JSON (podgląd struktury)
@@ -216,7 +264,8 @@ export default function ResearchRunResults({ run }: Props) {
 			const res = await fetch(`${API_BASE}/api/arduino-data`);
 			if (res.ok) {
 				const body = await res.json();
-				const dataStr = typeof body?.data === "string" ? body.data : body?.data?.data || "";
+				const dataStr =
+					typeof body?.data === "string" ? body.data : body?.data?.data || "";
 				try {
 					const obj = JSON.parse(dataStr);
 					wsJsonPretty = JSON.stringify(obj, null, 2);
@@ -227,20 +276,34 @@ export default function ResearchRunResults({ run }: Props) {
 				const httpBodyObj = { success: !!body?.success, data: dataStr };
 				httpJsonPretty = JSON.stringify(httpBodyObj, null, 2);
 				// Byte sizes w przeglądarce – użyj Blob do policzenia bajtów UTF‑8
-				wsNowBytes = new Blob([typeof wsJsonPretty === "string" ? wsJsonPretty : ""]).size;
+				wsNowBytes = new Blob([
+					typeof wsJsonPretty === "string" ? wsJsonPretty : "",
+				]).size;
 				httpNowBytes = new Blob([JSON.stringify(httpBodyObj)]).size;
 			}
 		} catch {}
 		setPayloadDetails({
 			first: {
-				ws: firstWs != null && Number.isFinite(firstWs) ? Number(firstWs.toFixed(2)) : undefined,
-				http: firstHttp != null && Number.isFinite(firstHttp) ? Number(firstHttp.toFixed(2)) : undefined,
+				ws:
+					firstWs != null && Number.isFinite(firstWs)
+						? Number(firstWs.toFixed(2))
+						: undefined,
+				http:
+					firstHttp != null && Number.isFinite(firstHttp)
+						? Number(firstHttp.toFixed(2))
+						: undefined,
 				wsTick: firstWsTick,
 				httpTick: firstHttpTick,
 			},
 			last: {
-				ws: lastWs != null && Number.isFinite(lastWs) ? Number(lastWs.toFixed(2)) : undefined,
-				http: lastHttp != null && Number.isFinite(lastHttp) ? Number(lastHttp.toFixed(2)) : undefined,
+				ws:
+					lastWs != null && Number.isFinite(lastWs)
+						? Number(lastWs.toFixed(2))
+						: undefined,
+				http:
+					lastHttp != null && Number.isFinite(lastHttp)
+						? Number(lastHttp.toFixed(2))
+						: undefined,
 				wsTick: lastWsTick,
 				httpTick: lastHttpTick,
 			},
@@ -288,7 +351,7 @@ export default function ResearchRunResults({ run }: Props) {
 					load: s.loadPct,
 					clients: s.clients,
 					payload: s.payloadBytes,
-					modes: new Set(),
+					modes: new Set<string>(),
 				});
 			map.get(key)!.modes.add(s.mode);
 		}
@@ -302,9 +365,9 @@ export default function ResearchRunResults({ run }: Props) {
 			);
 		return out.map(v => ({
 			key: v.key,
-			label: `Hz=${v.hz ?? "—"} | Load=${v.load ?? 0}% | Clients=${
+			label: `Hz=${v.hz ?? "—"} | Obciążenie=${v.load ?? 0}% | Klienci=${
 				v.clients ?? 0
-			} | Payload=${v.payload ?? "—"}B`,
+			} | Ładunek=${v.payload ?? "—"}B`,
 			hasWs: true,
 			hasHttp: true,
 		}));
@@ -326,24 +389,24 @@ export default function ResearchRunResults({ run }: Props) {
 		);
 	}
 	const metricLabel: Record<MetricKey, string> = {
-		rate: "Rate (/s)",
-		bytesRate: "Bytes/s",
-		payloadBytes: "Payload (B)",
+		rate: "Tempo (/s)",
+		bytesRate: "B/s",
+		payloadBytes: "Ładunek (B)",
 		jitterMs: "Jitter (ms)",
-		freshnessMs: "Staleness (ms)",
+		freshnessMs: "Wiek danych (ms)",
 		cpu: "CPU (%)",
 		rssMB: "RSS (MB)",
 	};
 	const metricDesc: Record<MetricKey, string> = {
-		rate: "Średnia liczba komunikatów / żądań na sekundę (wyżej=lepiej). Wykres liniowy pozwala obserwować stabilność tempa.",
+		rate: "Średnia liczba komunikatów/żądań na sekundę (wyżej=lepiej). Linia pokazuje stabilność tempa.",
 		bytesRate:
-			"Średni strumień bajtów na sekundę (niżej=efektywniej przy zachowaniu tego samego Rate). Linia ujawnia skoki obciążenia sieci.",
+			"Średni strumień bajtów na sekundę (niżej=efektywniej przy zachowaniu tego samego tempa). Linia ujawnia skoki obciążenia sieci.",
 		payloadBytes:
-			"Średni rozmiar pojedynczego ładunku (B). Dla HTTP = BytesRate/Rate; dla WS skorygowane o liczbę klientów (BytesRate/(Rate×N)). Pozwala ocenić efektywność kodowania.",
+			"Średni rozmiar pojedynczego ładunku (B). Dla HTTP = B/s ÷ tempo; dla WS skorygowane o liczbę klientów (B/s ÷ (tempo×N)). Pozwala ocenić efektywność kodowania.",
 		jitterMs:
 			"Wahania odstępów czasowych między zdarzeniami (niżej=lepiej, stabilniejsze dostarczanie). Pożądany wykres płaski możliwie nisko.",
 		freshnessMs:
-			"Staleness (opóźnienie danych od momentu generacji do użycia); niżej=lepsza świeżość. Szukamy niskiej i stabilnej linii.",
+			"Wiek danych (opóźnienie od generacji do użycia); niżej=lepiej. Szukamy niskiej i stabilnej linii.",
 		cpu: "Średnie zużycie CPU procesu backend (niżej=lepiej przy podobnych metrykach jakości). Wahania wskazują na skoki obciążenia.",
 		rssMB:
 			"Zużycie pamięci RSS (niżej=lepiej/stabilniej). Trend rosnący może sugerować wycieki lub akumulację.",
@@ -715,7 +778,7 @@ export default function ResearchRunResults({ run }: Props) {
 					variant='caption'
 					color='text.secondary'
 					sx={{ mt: 1, display: "block" }}>
-					Summary: średnie wartości sesji (uśrednienie repów). Kolor chipu
+					Podsumowanie: średnie wartości sesji (uśrednienie repów). Kolor chipu
 					wskazuje przewagę zgodnie z kierunkiem metryki.
 				</Typography>
 			</Box>
@@ -882,7 +945,13 @@ export default function ResearchRunResults({ run }: Props) {
 	return (
 		<Card variant='outlined' sx={{ mt: 2 }}>
 			<CardHeader
-				title='Wyniki runu (timeline)'
+				title={`Wyniki runu — ${
+					viewMode === "timeline"
+						? "Oś czasu"
+						: viewMode === "summary"
+						? "Podsumowanie"
+						: "KPI"
+				}`}
 				subheader={run.outDir?.split("/").pop()}
 				action={
 					<Stack direction='row' spacing={1}>
@@ -905,8 +974,11 @@ export default function ResearchRunResults({ run }: Props) {
 							rel='noreferrer'>
 							sessions.json
 						</Button>
-						{/* Nowy przycisk: szczegóły payloadu */}
-						<Button size='small' variant='outlined' onClick={openPayloadDialog} disabled={!timelineReady || !configKey}>
+						<Button
+							size='small'
+							variant='outlined'
+							onClick={openPayloadDialog}
+							disabled={!timelineReady || !configKey}>
 							Szczegóły payloadu
 						</Button>
 						<ToggleButtonGroup
@@ -915,8 +987,9 @@ export default function ResearchRunResults({ run }: Props) {
 							size='small'
 							onChange={(_, v) => v && setViewMode(v)}
 							orientation='horizontal'>
-							<ToggleButton value='timeline'>Timeline</ToggleButton>
-							<ToggleButton value='summary'>Summary</ToggleButton>
+							<ToggleButton value='timeline'>Oś czasu</ToggleButton>
+							<ToggleButton value='summary'>Podsumowanie</ToggleButton>
+							<ToggleButton value='kpis'>KPI</ToggleButton>
 						</ToggleButtonGroup>
 					</Stack>
 				}
@@ -924,13 +997,14 @@ export default function ResearchRunResults({ run }: Props) {
 			<CardContent>
 				{flags.realData && (
 					<Alert severity='info' sx={{ mb: 2 }}>
-						<strong>Real Data mode:</strong> pasywny pomiar rzeczywistych komunikatów. Payload wyliczany z obserwowanych strumieni (HTTP:
+						<strong>Tryb Real Data:</strong> pasywny pomiar rzeczywistych
+						komunikatów. Payload wyliczany z obserwowanych strumieni (HTTP:
 						bytes/rate; WS: bytes/(rate×N klientów)). Jitter dla WS może być
 						niższy (push), HTTP zawiera narzut opakowania treści i protokołu.
 					</Alert>
 				)}
-				{viewMode === "summary" && renderSummary()}
-				{viewMode === "summary" && <Divider sx={{ my: 2 }} />}
+
+				{/* FILTRY I WYBÓR KONFIGURACJI — na górze */}
 				<Stack
 					direction={{ xs: "column", md: "row" }}
 					spacing={2}
@@ -950,11 +1024,11 @@ export default function ResearchRunResults({ run }: Props) {
 							label='Metryka'
 							value={metric}
 							onChange={e => setMetric(e.target.value as typeof metric)}>
-							<MenuItem value='rate'>Rate (/s)</MenuItem>
-							<MenuItem value='bytesRate'>Bytes/s</MenuItem>
-							<MenuItem value='payloadBytes'>Payload (B)</MenuItem>
+							<MenuItem value='rate'>Tempo (/s)</MenuItem>
+							<MenuItem value='bytesRate'>B/s</MenuItem>
+							<MenuItem value='payloadBytes'>Ładunek (B)</MenuItem>
 							<MenuItem value='jitterMs'>Jitter (ms)</MenuItem>
-							<MenuItem value='freshnessMs'>Staleness (ms)</MenuItem>
+							<MenuItem value='freshnessMs'>Wiek danych (ms)</MenuItem>
 							<MenuItem value='cpu'>CPU (%)</MenuItem>
 							<MenuItem value='rssMB'>RSS (MB)</MenuItem>
 						</Select>
@@ -976,7 +1050,7 @@ export default function ResearchRunResults({ run }: Props) {
 					)}
 				</Stack>
 				{configKey && (
-					<Stack direction='row' spacing={1} sx={{ mb: 1 }}>
+					<Stack direction='row' spacing={1} sx={{ mb: 2 }}>
 						<Box
 							sx={{
 								px: 1,
@@ -1012,179 +1086,698 @@ export default function ResearchRunResults({ run }: Props) {
 						</Box>
 					</Stack>
 				)}
-				{timelineReady ? (
-					<Box>
+
+				{/* SEKCJE WIDOKÓW PONIŻEJ FILTRÓW */}
+				{viewMode === "summary" && renderSummary()}
+				{viewMode === "summary" && <Divider sx={{ my: 2 }} />}
+				{viewMode === "kpis" && (
+					<KpiSection sessions={sessions} configKey={configKey} />
+				)}
+
+				{viewMode === "timeline" &&
+					(timelineReady ? (
+						<Box>
+							<ApexChart
+								type='line'
+								height={360}
+								series={timelineSeries}
+								options={{
+									chart: {
+										id: "research-timeline",
+										toolbar: { show: true },
+										animations: { enabled: false },
+									},
+									stroke: {
+										width: (() => {
+											const hasDelta = timelineSeries.some(s =>
+												s.name.startsWith("Δ ")
+											);
+											const baseCount =
+												timelineSeries.length - (hasDelta ? 1 : 0);
+											const arr = Array.from({ length: baseCount }, () => 2);
+											if (hasDelta) arr.push(1);
+											return arr;
+										})(),
+										curve: "straight",
+									},
+									xaxis: {
+										categories: timelineCategories,
+										title: {
+											text: "Próbka (tick) – po trimie warmup/cooldown",
+										},
+									},
+									yaxis: { title: { text: metricLabel[metric] } },
+									colors: ["#1e88e5", "#2e7d32", "#ff9100"],
+									tooltip: {
+										shared: true,
+										custom: ({ series, dataPointIndex, w }) => {
+											type SeriesCfg = { name: string };
+											const wsIdx = (w.config.series as SeriesCfg[]).findIndex(
+												s => s.name.startsWith("WS ")
+											);
+											const httpIdx = (
+												w.config.series as SeriesCfg[]
+											).findIndex(s => s.name.startsWith("HTTP "));
+											const deltaIdx = (
+												w.config.series as SeriesCfg[]
+											).findIndex(s => s.name.startsWith("Δ WS-HTTP"));
+											const wsVal =
+												wsIdx >= 0 ? series[wsIdx][dataPointIndex] : null;
+											const httpVal =
+												httpIdx >= 0 ? series[httpIdx][dataPointIndex] : null;
+											const deltaVal =
+												deltaIdx >= 0 ? series[deltaIdx][dataPointIndex] : null;
+											let diffHtml = "";
+											if (
+												deltaVal != null &&
+												wsVal != null &&
+												httpVal != null
+											) {
+												const rel =
+													httpVal !== 0
+														? ((wsVal - httpVal) / httpVal) * 100
+														: 0;
+												diffHtml = `<tr><td colspan=2 style=\"padding-top:4px;border-top:1px solid #ccc;font-size:11px\">Δ: ${(
+													wsVal - httpVal
+												).toFixed(2)} (${rel.toFixed(1)}%)</td></tr>`;
+											}
+											return `<div style=\"padding:6px 8px;font-size:12px\">Tick: ${
+												dataPointIndex + 1
+											}<br/><table style=\"border-collapse:collapse\"><tr><td style=\"color:#1e88e5;padding-right:8px\">WS</td><td>${
+												wsVal != null ? wsVal.toFixed(2) : "—"
+											}</td></tr><tr><td style=\"color:#2e7d32;padding-right:8px\">HTTP</td><td>${
+												httpVal != null ? httpVal.toFixed(2) : "—"
+											}</td></tr>${diffHtml}</table></div>`;
+										},
+									},
+									legend: { position: "top" },
+								}}
+							/>
+							<Typography
+								variant='caption'
+								color='text.secondary'
+								sx={{ mt: 1, display: "block" }}>
+								Jak czytać: {metricDesc[metric]} Kierunek lepszy:{" "}
+								{betterDirection[metric] === "higher" ? "wyżej" : "niżej"}. Δ =
+								WS - HTTP (punktowo). Serie WS/HTTP są uśrednione po repetycjach
+								dla każdego ticka (n=WS: {repInfo.ws} / HTTP: {repInfo.http}).
+								Oś X to indeks ticka po odcięciu warmup/cooldown.
+							</Typography>
+							{/* Agregaty (tabela lub karty) */}
+							<Typography variant='subtitle2' gutterBottom sx={{ mt: 2 }}>
+								Podsumowanie agregatów (średnie po sesjach) – wybrana
+								konfiguracja
+							</Typography>
+							{renderAggregateTable()}
+						</Box>
+					) : (
+						<Typography variant='body2' color='text.secondary'>
+							Brak danych timeline.
+						</Typography>
+					))}
+			</CardContent>
+			{/* Dialog: Szczegóły payloadu */}
+			{payloadOpen && (
+				<Box /* portal-free lightweight dialog replacement */
+					sx={{
+						position: "fixed",
+						inset: 0,
+						zIndex: 1300,
+						backgroundColor: "rgba(0,0,0,0.5)",
+						display: "flex",
+						alignItems: "center",
+						justifyContent: "center",
+					}}
+					onClick={() => setPayloadOpen(false)}>
+					<Paper
+						elevation={3}
+						onClick={e => e.stopPropagation()}
+						sx={{
+							maxWidth: 980,
+							width: "96%",
+							maxHeight: "90vh",
+							overflow: "auto",
+							p: 2,
+						}}>
+						<Stack
+							direction='row'
+							alignItems='center'
+							justifyContent='space-between'
+							sx={{ mb: 1 }}>
+							<Typography variant='h6'>Szczegóły payloadu (B)</Typography>
+							<Button size='small' onClick={() => setPayloadOpen(false)}>
+								Zamknij
+							</Button>
+						</Stack>
+						{configKey && (
+							<Typography variant='body2' sx={{ mb: 1 }} color='text.secondary'>
+								Konfiguracja: {configKey.replaceAll("|", " | ")}
+							</Typography>
+						)}
+						<Grid container spacing={2}>
+							<Grid size={{ xs: 12, md: 6 }}>
+								<Paper variant='outlined' sx={{ p: 1.5 }}>
+									<Typography variant='subtitle2'>
+										Pierwszy payload (po trimie)
+									</Typography>
+									<Stack
+										direction='row'
+										spacing={1}
+										alignItems='center'
+										flexWrap='wrap'
+										useFlexGap
+										sx={{ mt: 1 }}>
+										<Chip
+											size='small'
+											color='primary'
+											label={`WS ${payloadDetails.first?.ws ?? "—"} B${
+												payloadDetails.first?.wsTick
+													? ` (tick ${payloadDetails.first?.wsTick})`
+													: ""
+											}`}
+										/>
+										<Chip
+											size='small'
+											color='success'
+											label={`HTTP ${payloadDetails.first?.http ?? "—"} B${
+												payloadDetails.first?.httpTick
+													? ` (tick ${payloadDetails.first?.httpTick})`
+													: ""
+											}`}
+										/>
+									</Stack>
+								</Paper>
+							</Grid>
+							<Grid size={{ xs: 12, md: 6 }}>
+								<Paper variant='outlined' sx={{ p: 1.5 }}>
+									<Typography variant='subtitle2'>
+										Ostatni payload (po trimie)
+									</Typography>
+									<Stack
+										direction='row'
+										spacing={1}
+										alignItems='center'
+										flexWrap='wrap'
+										useFlexGap
+										sx={{ mt: 1 }}>
+										<Chip
+											size='small'
+											color='primary'
+											label={`WS ${payloadDetails.last?.ws ?? "—"} B${
+												payloadDetails.last?.wsTick
+													? ` (tick ${payloadDetails.last?.wsTick})`
+													: ""
+											}`}
+										/>
+										<Chip
+											size='small'
+											color='success'
+											label={`HTTP ${payloadDetails.last?.http ?? "—"} B${
+												payloadDetails.last?.httpTick
+													? ` (tick ${payloadDetails.last?.httpTick})`
+													: ""
+											}`}
+										/>
+									</Stack>
+								</Paper>
+							</Grid>
+							<Grid size={{ xs: 12 }}>
+								<Alert severity='info' sx={{ mt: 1 }}>
+									HTTP zwykle ma większy payload (B), bo body zawiera opakowanie{" "}
+									{`{ success, data }`} i znakowane (escapowane) JSON w polu{" "}
+									<em>data</em>. Uwaga: <strong>Bytes/s (total)</strong> dla
+									HTTP obejmuje także narzut nagłówków protokołu (mierzony na
+									serwerze), podczas gdy <strong>Śr. B/żądanie</strong> dotyczy
+									samego body. Dla WS <strong>Bytes/s (total)</strong> to suma
+									ładunków pomnożona przez liczbę klientów;{" "}
+									<strong>Śr. B/komunikat</strong> to sam ładunek.
+								</Alert>
+							</Grid>
+							<Grid size={{ xs: 12, md: 6 }}>
+								<Typography variant='subtitle2' sx={{ mt: 1 }}>
+									Podgląd JSON (WS – bieżący)
+								</Typography>
+								<Paper
+									variant='outlined'
+									sx={{
+										p: 1,
+										fontFamily: "monospace",
+										fontSize: 12,
+										maxHeight: 280,
+										overflow: "auto",
+										whiteSpace: "pre",
+									}}>
+									{payloadDetails.wsJsonPretty || "—"}
+								</Paper>
+								<Typography variant='caption' color='text.secondary'>
+									Rozmiar bieżącego WS JSON: {payloadDetails.wsNowBytes ?? "—"}{" "}
+									B
+								</Typography>
+							</Grid>
+							<Grid size={{ xs: 12, md: 6 }}>
+								<Typography variant='subtitle2' sx={{ mt: 1 }}>
+									Podgląd JSON body (HTTP – bieżący)
+								</Typography>
+								<Paper
+									variant='outlined'
+									sx={{
+										p: 1,
+										fontFamily: "monospace",
+										fontSize: 12,
+										maxHeight: 280,
+										overflow: "auto",
+										whiteSpace: "pre",
+									}}>
+									{payloadDetails.httpJsonPretty || "—"}
+								</Paper>
+								<Typography variant='caption' color='text.secondary'>
+									Rozmiar bieżącego HTTP body:{" "}
+									{payloadDetails.httpNowBytes ?? "—"} B
+								</Typography>
+							</Grid>
+						</Grid>
+						<Typography
+							variant='caption'
+							color='text.secondary'
+							sx={{ mt: 1, display: "block" }}>
+							Uwaga: rzeczywista treść JSON z przebiegu nie jest zapisywana w
+							wynikach (persistowane są metryki i rozmiary). Powyżej pokazujemy{" "}
+							<strong>pierwszy/ostatni rozmiar (B)</strong> z sesji oraz{" "}
+							<strong>bieżący</strong> kształt JSON.
+						</Typography>
+					</Paper>
+				</Box>
+			)}
+		</Card>
+	);
+}
+
+// Typy pomocnicze do sekcji KPI (współdzielone)
+type KpiTimelineSessionSample = {
+	tSec: number;
+	rate: number;
+	bytesRate: number;
+	avgPayloadBytes?: number;
+	jitterMs: number;
+	freshnessMs: number;
+};
+type KpiTimelineSession = {
+	mode: "ws" | "polling";
+	clients?: number;
+	hz?: number;
+	loadPct?: number;
+	payloadBytes?: number;
+	samples: KpiTimelineSessionSample[];
+};
+
+// Sekcja KPI dla wybranej konfiguracji: 3 wykresy porównawcze WS vs HTTP
+function KpiSection({
+	sessions,
+	configKey,
+}: {
+	sessions: KpiTimelineSession[] | null;
+	configKey: string | null;
+}) {
+	const [perspective, setPerspective] = useState<"server" | "client">("server");
+	if (!sessions || !configKey)
+		return (
+			<Typography variant='body2' color='text.secondary'>
+				Brak danych KPI dla wybranej konfiguracji.
+			</Typography>
+		);
+
+	const filtered = (sessions || []).filter(s => {
+		const key = [
+			s.hz ?? "—",
+			s.loadPct ?? 0,
+			s.clients ?? 0,
+			s.payloadBytes ?? "—",
+		].join("|");
+		return key === configKey;
+	});
+	if (!filtered.length)
+		return (
+			<Typography variant='body2' color='text.secondary'>
+				Brak dopasowanych sesji dla KPI.
+			</Typography>
+		);
+
+	// Uśrednij repy dla każdej próbki osobno per protokół
+	function avgSeries(metric: keyof KpiTimelineSessionSample) {
+		const wsGroups = filtered.filter(s => s.mode === "ws").map(s => s.samples);
+		const httpGroups = filtered
+			.filter(s => s.mode === "polling")
+			.map(s => s.samples);
+		const maxLen = Math.max(
+			wsGroups.reduce((m, a) => Math.max(m, a.length), 0),
+			httpGroups.reduce((m, a) => Math.max(m, a.length), 0)
+		);
+		const avgFor = (
+			groups: KpiTimelineSessionSample[][]
+		): (number | null)[] => {
+			const out: (number | null)[] = [];
+			for (let i = 0; i < maxLen; i++) {
+				const bucket = groups
+					.map(g => g[i])
+					.filter(Boolean) as KpiTimelineSessionSample[];
+				if (!bucket.length) {
+					out.push(null);
+					continue;
+				}
+				if (metric === "avgPayloadBytes") {
+					// payload: preferuj bezpośrednie avgPayloadBytes; jeśli brak, policz z bytesRate/rate
+					const vals: number[] = [];
+					for (const b of bucket) {
+						let v: number | undefined = b.avgPayloadBytes;
+						if (!(Number.isFinite(v) && (v as number) > 0)) {
+							if (b.rate > 0) v = b.bytesRate / b.rate;
+						}
+						if (Number.isFinite(v)) vals.push(v as number);
+					}
+					out.push(
+						vals.length
+							? Number(
+									(vals.reduce((a, c) => a + c, 0) / vals.length).toFixed(2)
+							  )
+							: null
+					);
+				} else {
+					const vals = bucket
+						.map(b => b[metric] as number | undefined)
+						.filter(v => v != null && Number.isFinite(v)) as number[];
+					out.push(
+						vals.length
+							? Number(
+									(vals.reduce((a, c) => a + c, 0) / vals.length).toFixed(2)
+							  )
+							: null
+					);
+				}
+			}
+			return out;
+		};
+		return { ws: avgFor(wsGroups), http: avgFor(httpGroups) };
+	}
+
+	const rate = avgSeries("rate");
+	// Koszt sieci total B/s (serwer) i per klient (klient)
+	const bytes = avgSeries("bytesRate");
+	// Avg payload: osobno liczymy dla WS (dzielenie przez liczbę klientów)
+	const avgPayloadFor = (
+		groups: KpiTimelineSession[],
+		isWs: boolean
+	): (number | null)[] => {
+		const arr = groups.map(s => s.samples);
+		const maxLen = arr.reduce((m, a) => Math.max(m, a.length), 0);
+		const out: (number | null)[] = [];
+		for (let i = 0; i < maxLen; i++) {
+			const bucket = arr
+				.map(g => g[i])
+				.filter(Boolean) as KpiTimelineSessionSample[];
+			if (!bucket.length) {
+				out.push(null);
+				continue;
+			}
+			const vals: number[] = [];
+			for (let bi = 0; bi < bucket.length; bi++) {
+				const b = bucket[bi];
+				let v: number | undefined = b.avgPayloadBytes;
+				if (!(Number.isFinite(v) && (v as number) > 0)) {
+					if (b.rate > 0) v = b.bytesRate / b.rate;
+				}
+				if (Number.isFinite(v)) vals.push(v as number);
+			}
+			// Jeśli WS – skoryguj o liczbę klientów (średnia po sesjach z własnym N)
+			if (isWs) {
+				// znajdź średnie N klientów dla próbki i
+				const clientsVals = groups
+					.map(s => (s.samples[i] ? s.clients || 0 : null))
+					.filter((v): v is number => v != null);
+				const avgClients = clientsVals.length
+					? clientsVals.reduce((a, c) => a + c, 0) / clientsVals.length
+					: 0;
+				out.push(
+					vals.length
+						? Number(
+								(
+									vals.reduce((a, c) => a + c, 0) /
+									vals.length /
+									(avgClients || 1)
+								).toFixed(2)
+						  )
+						: null
+				);
+			} else {
+				out.push(
+					vals.length
+						? Number((vals.reduce((a, c) => a + c, 0) / vals.length).toFixed(2))
+						: null
+				);
+			}
+		}
+		return out;
+	};
+	const payload = {
+		ws: avgPayloadFor(
+			filtered.filter(s => s.mode === "ws"),
+			true
+		),
+		http: avgPayloadFor(
+			filtered.filter(s => s.mode === "polling"),
+			false
+		),
+	};
+	// Stabilność
+	const jitter = avgSeries("jitterMs");
+	const fresh = avgSeries("freshnessMs");
+
+	// Wyrównaj długości do wspólnego minimum dla porównań na wykresach
+	const minLen = Math.min(
+		rate.ws.length,
+		rate.http.length,
+		bytes.ws.length,
+		bytes.http.length,
+		payload.ws.length,
+		payload.http.length,
+		jitter.ws.length,
+		jitter.http.length,
+		fresh.ws.length,
+		fresh.http.length
+	);
+	const categories = Array.from({ length: minLen }, (_, i) => i + 1);
+	function align(pair: { ws: (number | null)[]; http: (number | null)[] }) {
+		return { ws: pair.ws.slice(0, minLen), http: pair.http.slice(0, minLen) };
+	}
+	const rateA = align(rate);
+	const bytesA = align(bytes);
+	const payloadA = align(payload);
+	const jitterA = align(jitter);
+	const freshA = align(fresh);
+
+	// Przekształcenia wg perspektywy:
+	// - server: pokazujemy total WS B/s (sumaryczny egress = bytesRate) oraz HTTP total B/s; rate pozostaje bez zmian
+	// - client: normalizujemy do per‑client: HTTP => total/N, WS => rate i payload bez zmian, ale B/s per‑client = rate × payload
+	function toClientPerspective() {
+		// Pobierz średnią liczbę klientów dla wybranej konfiguracji (z sesji)
+		const httpN = (() => {
+			const vals = (sessions || [])
+				.filter(s => s.mode === "polling")
+				.filter(s => {
+					const key = [
+						s.hz ?? "—",
+						s.loadPct ?? 0,
+						s.clients ?? 0,
+						s.payloadBytes ?? "—",
+					].join("|");
+					return key === configKey;
+				})
+				.map(s => s.clients || 0);
+			return vals.length ? vals.reduce((a, c) => a + c, 0) / vals.length : 0;
+		})();
+		// Rate: HTTP per‑client = rate / N; WS per‑client = rate (broadcast)
+		const rateCli = {
+			ws: rateA.ws, // identyczne
+			http: rateA.http.map(v =>
+				v != null && httpN > 0 ? Number((v / httpN).toFixed(2)) : v
+			),
+		};
+		// Bytes/s: HTTP per‑client = bytes/N; WS per‑client = rate × payload
+		const bytesCli = {
+			ws: payloadA.ws.map((p, i) => {
+				const r = rateA.ws[i];
+				if (p != null && r != null) return Number((p * r).toFixed(2));
+				return null;
+			}),
+			http: bytesA.http.map(v =>
+				v != null && httpN > 0 ? Number((v / httpN).toFixed(2)) : v
+			),
+		};
+		return { rateCli, bytesCli };
+	}
+	const clientView = toClientPerspective();
+
+	return (
+		<Box sx={{ mb: 2 }}>
+			<Stack direction='row' spacing={1} sx={{ mb: 1 }}>
+				<ToggleButtonGroup
+					size='small'
+					exclusive
+					value={perspective}
+					onChange={(_, v) => v && setPerspective(v)}>
+					<ToggleButton value='server'>Perspektywa: Serwer</ToggleButton>
+					<ToggleButton value='client'>Perspektywa: Klient</ToggleButton>
+				</ToggleButtonGroup>
+				<Typography variant='caption' color='text.secondary'>
+					Serwer: total B/s (HTTP zawiera nagłówki), WS total = ładunek×N.
+					Klient: per‑client B/s (HTTP ÷ N; WS = rate×payload), rate/cli (HTTP ÷
+					N; WS = rate).
+				</Typography>
+			</Stack>
+			<Grid container spacing={2}>
+				<Grid size={{ xs: 12, md: 6 }}>
+					<Paper sx={{ p: 2 }}>
+						<Typography variant='subtitle2'>
+							Tempo ({perspective === "client" ? "per klient" : "całkowite"})
+						</Typography>
 						<ApexChart
 							type='line'
-							height={360}
-							series={timelineSeries}
+							height={260}
+							series={[
+								{
+									name: "WS komunikaty/s",
+									data:
+										perspective === "client" ? clientView.rateCli.ws : rateA.ws,
+								},
+								{
+									name: "HTTP żądania/s",
+									data:
+										perspective === "client"
+											? clientView.rateCli.http
+											: rateA.http,
+								},
+							]}
 							options={{
-								chart: {
-									id: "research-timeline",
-									toolbar: { show: true },
-									animations: { enabled: false },
-								},
-								stroke: {
-									width: (() => {
-										const hasDelta = timelineSeries.some(s =>
-											s.name.startsWith("Δ ")
-										);
-										const baseCount =
-											timelineSeries.length - (hasDelta ? 1 : 0);
-										const arr = Array.from({ length: baseCount }, () => 2);
-										if (hasDelta) arr.push(1);
-										return arr;
-									})(),
-									curve: "straight",
-								},
-								xaxis: {
-									categories: timelineCategories,
-									title: { text: "Próbka (tick) – po trimie warmup/cooldown" },
-								},
-								yaxis: (() => {
-									const hasDelta = timelineSeries.some(s =>
-										s.name.startsWith("Δ ")
-									);
-									const baseCount = timelineSeries.length - (hasDelta ? 1 : 0);
-									const axes: Array<{
-										title: { text: string };
-										opposite?: boolean;
-										decimalsInFloat?: number;
-									}> = Array.from({ length: baseCount }, () => ({
-										title: { text: metricLabel[metric] },
-									}));
-									if (hasDelta)
-										axes.push({
-											opposite: true,
-											title: { text: "Δ WS-HTTP" },
-											decimalsInFloat: 2,
-										});
-									return axes;
-								})(),
-								colors: ["#1e88e5", "#2e7d32", "#ff9100"],
-								tooltip: {
-									shared: true,
-									custom: ({ series, dataPointIndex, w }) => {
-										type SeriesCfg = { name: string };
-										const wsIdx = (w.config.series as SeriesCfg[]).findIndex(
-											s => s.name.startsWith("WS ")
-										);
-										const httpIdx = (w.config.series as SeriesCfg[]).findIndex(
-											s => s.name.startsWith("HTTP ")
-										);
-										const deltaIdx = (w.config.series as SeriesCfg[]).findIndex(
-											s => s.name.startsWith("Δ WS-HTTP")
-										);
-										const wsVal =
-											wsIdx >= 0 ? series[wsIdx][dataPointIndex] : null;
-										const httpVal =
-											httpIdx >= 0 ? series[httpIdx][dataPointIndex] : null;
-										const deltaVal =
-											deltaIdx >= 0 ? series[deltaIdx][dataPointIndex] : null;
-										let diffHtml = "";
-										if (deltaVal != null && wsVal != null && httpVal != null) {
-											const rel =
-												httpVal !== 0 ? ((wsVal - httpVal) / httpVal) * 100 : 0;
-											diffHtml = `<tr><td colspan=2 style=\"padding-top:4px;border-top:1px solid #ccc;font-size:11px\">Δ: ${(
-												wsVal - httpVal
-											).toFixed(2)} (${rel.toFixed(1)}%)</td></tr>`;
-										}
-										return `<div style=\"padding:6px 8px;font-size:12px\">Tick: ${
-											dataPointIndex + 1
-										}<br/><table style=\"border-collapse:collapse\"><tr><td style=\"color:#1e88e5;padding-right:8px\">WS</td><td>${
-											wsVal != null ? wsVal.toFixed(2) : "—"
-										}</td></tr><tr><td style=\"color:#2e7d32;padding-right:8px\">HTTP</td><td>${
-											httpVal != null ? httpVal.toFixed(2) : "—"
-										}</td></tr>${diffHtml}</table></div>`;
+								chart: { animations: { enabled: false } },
+								xaxis: { categories },
+								yaxis: {
+									title: {
+										text:
+											perspective === "client"
+												? "/s (na klienta)"
+												: "/s (łącznie)",
 									},
 								},
+								stroke: { width: 2 },
 								legend: { position: "top" },
 							}}
 						/>
 						<Typography
 							variant='caption'
 							color='text.secondary'
-							sx={{ mt: 1, display: "block" }}>
-							{metricDesc[metric]} Kierunek lepszy:{" "}
-							{betterDirection[metric] === "higher" ? "wyżej" : "niżej"}. Δ = WS
-							- HTTP. Średnie tickowe uśredniają wszystkie repetycje (n=WS:
-							{repInfo.ws} / HTTP:{repInfo.http}).
-						</Typography>
-						{/* Agregaty (tabela lub karty) */}
-						<Typography variant='subtitle2' gutterBottom sx={{ mt: 2 }}>
-							Podsumowanie agregatów (średnie po sesjach) – wybrana konfiguracja
-						</Typography>
-						{renderAggregateTable()}
-					</Box>
-				) : (
-					<Typography variant='body2' color='text.secondary'>
-						Brak danych timeline.
-					</Typography>
-				)}
-			</CardContent>
-			{/* Dialog: Szczegóły payloadu */}
-			{payloadOpen && (
-				<Box /* portal-free lightweight dialog replacement */
-					sx={{
-						position: 'fixed', inset: 0, zIndex: 1300,
-						backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-					}}
-					onClick={() => setPayloadOpen(false)}>
-					<Paper elevation={3} onClick={e => e.stopPropagation()} sx={{ maxWidth: 980, width: '96%', maxHeight: '90vh', overflow: 'auto', p: 2 }}>
-						<Stack direction='row' alignItems='center' justifyContent='space-between' sx={{ mb: 1 }}>
-							<Typography variant='h6'>Szczegóły payloadu (B)</Typography>
-							<Button size='small' onClick={() => setPayloadOpen(false)}>Zamknij</Button>
-						</Stack>
-						{configKey && (
-							<Typography variant='body2' sx={{ mb: 1 }} color='text.secondary'>
-								Konfiguracja: {configKey.replaceAll('|', ' | ')}
-							</Typography>
-						)}
-						<Grid container spacing={2}>
-							<Grid size={{ xs: 12, md: 6 }}>
-								<Paper variant='outlined' sx={{ p: 1.5 }}>
-									<Typography variant='subtitle2'>Pierwszy payload (po trimie)</Typography>
-									<Stack direction='row' spacing={1} alignItems='center' flexWrap='wrap' useFlexGap sx={{ mt: 1 }}>
-										<Chip size='small' color='primary' label={`WS ${payloadDetails.first?.ws ?? '—'} B${payloadDetails.first?.wsTick ? ` (tick ${payloadDetails.first?.wsTick})` : ''}`} />
-										<Chip size='small' color='success' label={`HTTP ${payloadDetails.first?.http ?? '—'} B${payloadDetails.first?.httpTick ? ` (tick ${payloadDetails.first?.httpTick})` : ''}`} />
-									</Stack>
-								</Paper>
-							</Grid>
-							<Grid size={{ xs: 12, md: 6 }}>
-								<Paper variant='outlined' sx={{ p: 1.5 }}>
-									<Typography variant='subtitle2'>Ostatni payload (po trimie)</Typography>
-									<Stack direction='row' spacing={1} alignItems='center' flexWrap='wrap' useFlexGap sx={{ mt: 1 }}>
-										<Chip size='small' color='primary' label={`WS ${payloadDetails.last?.ws ?? '—'} B${payloadDetails.last?.wsTick ? ` (tick ${payloadDetails.last?.wsTick})` : ''}`} />
-										<Chip size='small' color='success' label={`HTTP ${payloadDetails.last?.http ?? '—'} B${payloadDetails.last?.httpTick ? ` (tick ${payloadDetails.last?.httpTick})` : ''}`} />
-									</Stack>
-								</Paper>
-							</Grid>
-							<Grid size={{ xs: 12 }}>
-								<Alert severity='info' sx={{ mt: 1 }}>
-									HTTP zwykle ma większy payload (B), bo body zawiera opakowanie {`{ success, data }`} i znakowane (escapowane) JSON w polu <em>data</em>. Nasza metryka liczy <strong>tylko</strong> bajty body (bez nagłówków HTTP). WS przesyła sam JSON danych.
-								</Alert>
-							</Grid>
-							<Grid size={{ xs: 12, md: 6 }}>
-								<Typography variant='subtitle2' sx={{ mt: 1 }}>Podgląd JSON (WS – bieżący)</Typography>
-								<Paper variant='outlined' sx={{ p: 1, fontFamily: 'monospace', fontSize: 12, maxHeight: 280, overflow: 'auto', whiteSpace: 'pre' }}>
-									{payloadDetails.wsJsonPretty || '—'}
-								</Paper>
-								<Typography variant='caption' color='text.secondary'>Rozmiar bieżącego WS JSON: {payloadDetails.wsNowBytes ?? '—'} B</Typography>
-							</Grid>
-							<Grid size={{ xs: 12, md: 6 }}>
-								<Typography variant='subtitle2' sx={{ mt: 1 }}>Podgląd JSON body (HTTP – bieżący)</Typography>
-								<Paper variant='outlined' sx={{ p: 1, fontFamily: 'monospace', fontSize: 12, maxHeight: 280, overflow: 'auto', whiteSpace: 'pre' }}>
-									{payloadDetails.httpJsonPretty || '—'}
-								</Paper>
-								<Typography variant='caption' color='text.secondary'>Rozmiar bieżącego HTTP body: {payloadDetails.httpNowBytes ?? '—'} B</Typography>
-							</Grid>
-						</Grid>
-						<Typography variant='caption' color='text.secondary' sx={{ mt: 1, display: 'block' }}>
-							Uwaga: rzeczywista treść JSON z przebiegu nie jest zapisywana w wynikach (persistowane są metryki i rozmiary). Powyżej pokazujemy <strong>pierwszy/ostatni rozmiar (B)</strong> z sesji oraz <strong>bieżący</strong> kształt JSON.
+							sx={{ display: "block", mt: 1 }}>
+							Jak czytać: płaska linia = stabilne tempo. W perspektywie Klient
+							HTTP dzielimy przez N, WS zostaje bez zmian (broadcast). Porównuj
+							poziomy i ich stabilność.
 						</Typography>
 					</Paper>
-				</Box>
-			)}
-		</Card>
+				</Grid>
+				<Grid size={{ xs: 12, md: 6 }}>
+					<Paper sx={{ p: 2 }}>
+						<Typography variant='subtitle2'>
+							Koszt sieci i payload (
+							{perspective === "client" ? "per klient" : "całkowite"})
+						</Typography>
+						<ApexChart
+							type='line'
+							height={260}
+							series={[
+								{
+									name:
+										perspective === "client"
+											? "WS B/s (per klient)"
+											: "WS B/s (total)",
+									data:
+										perspective === "client"
+											? clientView.bytesCli.ws
+											: bytesA.ws,
+								},
+								{
+									name:
+										perspective === "client"
+											? "HTTP B/s (per klient)"
+											: "HTTP B/s (total)",
+									data:
+										perspective === "client"
+											? clientView.bytesCli.http
+											: bytesA.http,
+								},
+								{ name: "WS Śr. B/komunikat", data: payloadA.ws },
+								{ name: "HTTP Śr. B/żądanie", data: payloadA.http },
+							]}
+							options={{
+								chart: { animations: { enabled: false } },
+								xaxis: { categories },
+								yaxis: [
+									{
+										title: {
+											text:
+												perspective === "client"
+													? "B/s (per klient)"
+													: "B/s (total)",
+										},
+									},
+									{ opposite: true, title: { text: "Śr. B" } },
+								],
+								stroke: { width: [2, 2, 1, 1] },
+								legend: { position: "top" },
+								tooltip: { shared: true },
+							}}
+						/>
+						<Typography
+							variant='caption'
+							color='text.secondary'
+							sx={{ display: "block", mt: 1 }}>
+							Jak czytać: linie B/s pokazują koszt sieci. HTTP (total) obejmuje
+							nagłówki; w Klient dzielimy przez N. Linia avg B/* to rozmiar
+							ładunku bez narzutu protokołu – mniejsza wartość przy tym samym
+							tempie = większa efektywność.
+						</Typography>
+					</Paper>
+				</Grid>
+				<Grid size={{ xs: 12 }}>
+					<Paper sx={{ p: 2 }}>
+						<Typography variant='subtitle2'>
+							Stabilność: jitter i świeżość
+						</Typography>
+						<ApexChart
+							type='line'
+							height={260}
+							series={[
+								{ name: "WS jitter (ms)", data: jitterA.ws },
+								{ name: "HTTP jitter (ms)", data: jitterA.http },
+								{ name: "WS wiek danych (ms)", data: freshA.ws },
+								{ name: "HTTP wiek danych (ms)", data: freshA.http },
+							]}
+							options={{
+								chart: { animations: { enabled: false } },
+								xaxis: { categories },
+								yaxis: { title: { text: "ms" } },
+								stroke: { width: [2, 2, 1, 1] },
+								legend: { position: "top" },
+								tooltip: { shared: true },
+							}}
+						/>
+						<Typography
+							variant='caption'
+							color='text.secondary'
+							sx={{ display: "block", mt: 1 }}>
+							Jak czytać: niższy jitter = bardziej regularne odstępy; niższa
+							świeżość (staleness) = nowsze dane u odbiorcy. Stabilne, niskie
+							przebiegi świadczą o lepszej jakości dostarczania.
+						</Typography>
+					</Paper>
+				</Grid>
+			</Grid>
+		</Box>
 	);
 }

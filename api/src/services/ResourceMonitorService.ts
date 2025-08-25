@@ -782,10 +782,14 @@ class ResourceMonitorService {
   ) {
     this.stopSyntheticHttp();
     const every = Math.max(50, intervalMs);
-    const bytes = Math.max(
+    const bodyBytes = Math.max(
       1,
       Math.floor(payloadBytes || this.lastArduinoPayloadBytes),
     );
+    // Przybliżony narzut HTTP: status line + podstawowe nagłówki + CRLF
+    // Uwaga: prawdziwy egress liczymy w globalRoutes przez socket.bytesWritten.
+    const approxHeaders = 120; // ~"HTTP/1.1 200 OK" + kilka nagłówków
+    const approxTotalBytes = bodyBytes + approxHeaders;
     const e2eIngestDelayMs = 1; // symulowany dystans source->ingest
     const e2eEmitDelayMs = 2; // symulowany dystans ingest->emit/response
     const doOnce = () => {
@@ -799,7 +803,7 @@ class ResourceMonitorService {
           e2eIngestDelayMs,
         );
         // 3. HTTP odpowiedź (emit) po dodatkowym opóźnieniu
-        setTimeout(() => this.onHttpResponse(bytes), e2eEmitDelayMs);
+        setTimeout(() => this.onHttpResponse(approxTotalBytes), e2eEmitDelayMs);
       } catch {}
     };
     for (let i = 0; i < Math.max(1, count); i++) {

@@ -17,16 +17,27 @@ globalRoutes.get(
   },
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      // call controller to get data string
+      // get body
       const dataString = await ArduinoDataController.getLatestString();
       const payload = { success: true, data: dataString };
       const bodyStr = JSON.stringify(payload);
-      const bytes = Buffer.byteLength(bodyStr, 'utf8');
 
-      // record into monitor
-      ResourceMonitor.onHttpResponse(bytes);
+      // measure exact bytes written on the socket for THIS response
+      const sock = req.socket || (res as any).socket;
+      const start =
+        sock && typeof sock.bytesWritten === 'number' ? sock.bytesWritten : 0;
+      res.once('finish', () => {
+        try {
+          const end =
+            sock && typeof sock.bytesWritten === 'number'
+              ? sock.bytesWritten
+              : start;
+          const delta = Math.max(0, end - start);
+          ResourceMonitor.onHttpResponse(delta);
+        } catch {}
+      });
 
-      // send
+      // send (express will set Content-Length automatically; counting is done on 'finish')
       return res.status(200).type('application/json').send(bodyStr);
     } catch (err) {
       return next(err);

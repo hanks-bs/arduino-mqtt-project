@@ -140,9 +140,9 @@ export default function ResourceMonitor({
 	};
 
 	const memSeries = [
-		{ name: "RSS MB", data: series.map(s => Number(s.rssMB.toFixed(2))) },
+		{ name: "RSS (MB)", data: series.map(s => Number(s.rssMB.toFixed(2))) },
 		{
-			name: "Heap Used MB",
+			name: "Użycie sterty (MB)",
 			data: series.map(s => Number(s.heapUsedMB.toFixed(2))),
 		},
 	];
@@ -156,7 +156,7 @@ export default function ResourceMonitor({
 		{ name: "ELU (0..1)", data: series.map(s => Number(s.elu.toFixed(4))) },
 	];
 	const eluOptions = {
-		...makeBase("Event Loop Utilization", "ELU"),
+		...makeBase("Wykorzystanie pętli zdarzeń (ELU)", "ELU"),
 		yaxis: { title: { text: "ELU" } },
 	};
 
@@ -195,14 +195,21 @@ export default function ResourceMonitor({
 		return Number((((w - h) / h) * 100).toFixed(2));
 	});
 	const tempoSeries = [
-		{ name: "HTTP req/s", data: httpRateArr.map(v => Number(v.toFixed(3))) },
-		{ name: "WS msg/s", data: wsRateArr.map(v => Number(v.toFixed(3))) },
-		{ name: "Δ% (WS vs HTTP)", data: rateDeltaPct, type: "line" as const },
+		{
+			name: "HTTP żądania/s",
+			data: httpRateArr.map(v => Number(v.toFixed(3))),
+		},
+		{ name: "WS komunikaty/s", data: wsRateArr.map(v => Number(v.toFixed(3))) },
+		{
+			name: "Δ% (WS względem HTTP)",
+			data: rateDeltaPct,
+			type: "line" as const,
+		},
 	];
 	const tempoOptions: ApexOptions = {
 		...makeBase("Tempo + Δ%", "/s"),
 		yaxis: [
-			{ title: { text: "req/s, msg/s" } },
+			{ title: { text: "żądania/s, komunikaty/s" } },
 			{ opposite: true, title: { text: "Δ%" } },
 		],
 		stroke: { width: [2, 2, 1], dashArray: [0, 0, 4] },
@@ -220,25 +227,28 @@ export default function ResourceMonitor({
 	});
 	const kosztSeries = [
 		{
-			name: "HTTP B/s (total)",
+			name: "HTTP B/s (łącznie)",
 			data: httpBytesArr.map(v => Number(v.toFixed(0))),
 		},
-		{ name: "WS B/s (total)", data: wsBytesArr.map(v => Number(v.toFixed(0))) },
 		{
-			name: "HTTP avg B/req",
+			name: "WS B/s (łącznie)",
+			data: wsBytesArr.map(v => Number(v.toFixed(0))),
+		},
+		{
+			name: "HTTP śr. B/żądanie",
 			data: series.map(s => Number(s.httpAvgBytesPerReq.toFixed(2))),
 		},
 		{
-			name: "WS avg B/msg",
+			name: "WS śr. B/komunikat",
 			data: series.map(s => Number(s.wsAvgBytesPerMsg.toFixed(2))),
 		},
-		{ name: "Δ% total B/s", data: bytesDeltaPct },
+		{ name: "Δ% B/s (łącznie)", data: bytesDeltaPct },
 	];
 	const kosztOptions: ApexOptions = {
 		...makeBase("Koszt sieci i payload", "B/s"),
 		yaxis: [
-			{ title: { text: "B/s (total)" } },
-			{ opposite: true, title: { text: "Avg B" } },
+			{ title: { text: "B/s (łącznie)" } },
+			{ opposite: true, title: { text: "Śr. B" } },
 		],
 		stroke: { width: [2, 2, 1, 1, 1], dashArray: [0, 0, 4, 4, 6] },
 		tooltip: { shared: true },
@@ -250,21 +260,21 @@ export default function ResourceMonitor({
 	);
 	const stabilitySeries = [
 		{
-			name: "HTTP jitter ms",
+			name: "HTTP jitter (ms)",
 			data: series.map(s => Number(s.httpJitterMs.toFixed(2))),
 		},
 		{
-			name: "WS jitter ms",
+			name: "WS jitter (ms)",
 			data: series.map(s => Number(s.wsJitterMs.toFixed(2))),
 		},
 		{
-			name: "Freshness ms",
+			name: "Wiek danych (ms)",
 			data: series.map(s => Number(s.dataFreshnessMs.toFixed(0))),
 		},
 		{ name: "Δ jitter (WS-HTTP)", data: jitterDiff },
 	];
 	const stabilityOptions: ApexOptions = {
-		...makeBase("Jitter & Freshness + Δ", "ms"),
+		...makeBase("Jitter i wiek danych + Δ", "ms"),
 		stroke: { width: [2, 2, 2, 1], dashArray: [0, 0, 5, 4] },
 		colors: [
 			theme.palette.warning.main,
@@ -282,15 +292,15 @@ export default function ResourceMonitor({
 	return (
 		<Box>
 			<Stack direction='row' spacing={1} sx={{ mb: 1, flexWrap: "wrap" }}>
-				<Chip label={`WS clients: ${last?.wsClients ?? 0}`} />
-				<Chip label={`HTTP total: ${last?.totalHttpRequests ?? 0}`} />
-				<Chip label={`WS total: ${last?.totalWsMessages ?? 0}`} />
+				<Chip label={`Klientów WS: ${last?.wsClients ?? 0}`} />
+				<Chip label={`HTTP łącznie: ${last?.totalHttpRequests ?? 0}`} />
+				<Chip label={`WS łącznie: ${last?.totalWsMessages ?? 0}`} />
 				<Chip
-					label={`HTTP bytes: ${last ? Math.round(last.totalHttpBytes) : 0}`}
+					label={`HTTP bajty: ${last ? Math.round(last.totalHttpBytes) : 0}`}
 				/>
-				<Chip label={`WS bytes: ${last ? Math.round(last.totalWsBytes) : 0}`} />
+				<Chip label={`WS bajty: ${last ? Math.round(last.totalWsBytes) : 0}`} />
 				<Chip label={`LoadAvg1: ${last ? last.loadAvg1.toFixed(2) : "0.00"}`} />
-				<Chip label={`Uptime: ${last ? Math.round(last.uptimeSec) : 0}s`} />
+				<Chip label={`Czas pracy: ${last ? Math.round(last.uptimeSec) : 0}s`} />
 			</Stack>
 
 			<Stack direction='row' spacing={2} sx={{ mb: 2 }}>
@@ -376,76 +386,16 @@ export default function ResourceMonitor({
 					<Grid size={{ xs: 12, md: 6 }}>
 						<Paper sx={{ p: 2 }}>
 							<Chart
-								options={cpuOptions}
-								series={cpuSeries}
-								type='line'
-								height={220}
-							/>
-							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
-								CPU (% procesu). Niżej = mniejsze zużycie przy danym obciążeniu
-								(więcej zapasu). Wysokie i rosnące wartości mogą ograniczyć
-								skalowalność.
-							</Box>
-						</Paper>
-					</Grid>
-					<Grid size={{ xs: 12, md: 6 }}>
-						<Paper sx={{ p: 2 }}>
-							<Chart
-								options={memOptions}
-								series={memSeries}
-								type='line'
-								height={220}
-							/>
-							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
-								Pamięć (RSS + Heap Used). Stabilnie i niżej = lepiej.
-								Skok/pełzanie w górę może sugerować wycieki lub presję GC.
-							</Box>
-						</Paper>
-					</Grid>
-
-					<Grid size={{ xs: 12, md: 6 }}>
-						<Paper sx={{ p: 2 }}>
-							<Chart
-								options={eluOptions}
-								series={eluSeries}
-								type='line'
-								height={220}
-							/>
-							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
-								ELU (Event Loop Utilization 0..1). Wyżej =&gt; bardziej zajęta
-								pętla. Ciągłe wartości blisko 1 grożą rosnącym opóźnieniem
-								reakcji.
-							</Box>
-						</Paper>
-					</Grid>
-					<Grid size={{ xs: 12, md: 6 }}>
-						<Paper sx={{ p: 2 }}>
-							<Chart
-								options={loopDelayOptions}
-								series={loopDelaySeries}
-								type='line'
-								height={220}
-							/>
-							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
-								Opóźnienie pętli zdarzeń (p50/p99/max). Niżej = mniejsze lagi
-								aplikacji. Szczyty max to pojedyncze zacięcia.
-							</Box>
-						</Paper>
-					</Grid>
-
-					<Grid size={{ xs: 12, md: 6 }}>
-						<Paper sx={{ p: 2 }}>
-							<Chart
 								options={tempoOptions}
 								series={tempoSeries}
 								type='line'
 								height={260}
 							/>
 							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
-								Tempo zdarzeń: HTTP req/s (odpowiedzi), WS msg/s (komunikaty).
-								Δ% = różnica względna (WS-HTTP)/HTTP. Wyżej = większa
-								przepustowość. Fair: WS liczymy per komunikat (nie mnożymy przez
-								klientów), by uniknąć sztucznego wzrostu przy broadcast.
+								Tempo zdarzeń: HTTP żądania/s, WS komunikaty/s. Δ% =
+								(WS-HTTP)/HTTP. Wyżej = większa przepustowość. Fair: WS liczymy
+								per komunikat (bez mnożenia przez klientów), by uniknąć
+								sztucznego wzrostu przy broadcast.
 							</Box>
 						</Paper>
 					</Grid>
@@ -458,10 +408,10 @@ export default function ResourceMonitor({
 								height={260}
 							/>
 							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
-								Koszt sieci: total B/s = sumaryczne bajty (dla WS mnożone przez
-								liczbę klientów – realny egress). Avg B/* = średni rozmiar
-								ładunku (bez mnożenia). Δ% pokazuje względną różnicę kosztu.
-								Niżej total B/s przy podobnym tempie = bardziej efektywne.
+								Koszt sieci: B/s (total) = sumaryczne bajty/s. Dla WS mnożone
+								przez N klientów (realny egress). Śr. B/* = średni rozmiar
+								ładunku (bez narzutu protokołu). Δ% = względna różnica kosztu.
+								Niżej B/s przy podobnym tempie = bardziej efektywnie.
 							</Box>
 						</Paper>
 					</Grid>
@@ -475,9 +425,9 @@ export default function ResourceMonitor({
 							/>
 							<Box sx={{ mt: 1, fontSize: 12, color: "text.secondary" }}>
 								Stabilność i świeżość: jitter = zmienność interwałów
-								(niżej=stabilniej), freshness = wiek danych (niżej=aktualniej).
-								Δ jitter dodatni oznacza większą zmienność WS vs HTTP. Niższe
-								jitter+freshness = szybsza reakcja systemu.
+								(niżej=stabilniej), wiek danych = opóźnienie dostarczenia
+								(niżej=aktualniej). Δ jitter &gt; 0 oznacza większą zmienność WS
+								vs HTTP. Niższe przebiegi = szybsza reakcja.
 							</Box>
 						</Paper>
 					</Grid>

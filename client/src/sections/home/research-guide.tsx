@@ -23,8 +23,8 @@ export default function ResearchGuide() {
 				API:
 				<strong> CPU% </strong>, <strong>pamięć (RSS)</strong>,
 				<strong> ELU / opóźnienie pętli zdarzeń</strong>,
-				<strong> tempo zdarzeń (Rate)</strong>, <strong>przepływ bajtów</strong>
-				,<strong> wielkość ładunku</strong>, <strong>jitter</strong> i
+				<strong> tempo zdarzeń</strong>, <strong>przepływ bajtów (B/s)</strong>,
+				<strong> wielkość ładunku</strong>, <strong>jitter</strong> i
 				<strong> staleness (wiek danych)</strong>. Służy jako narzędzie
 				obserwacyjne do jakościowej (na żywo) i wstępnej ilościowej oceny różnic
 				między strategią <em>push (WebSocket)</em> oraz{" "}
@@ -38,15 +38,17 @@ export default function ResearchGuide() {
 				<ListItem>
 					ELU / p99 loop delay – presja na pętlę zdarzeń (responsywność).
 				</ListItem>
-				<ListItem>Rate (msg/s lub req/s) – tempo dostarczania danych.</ListItem>
 				<ListItem>
-					Bytes/s & Payload – narzut transferu i średni rozmiar ładunku.
+					Tempo (komunikaty/s lub żądania/s) – szybkość dostarczania danych.
+				</ListItem>
+				<ListItem>
+					B/s i ładunek – narzut transferu i średni rozmiar ładunku.
 				</ListItem>
 				<ListItem>
 					Jitter – stabilność odstępów między kolejnymi danymi.
 				</ListItem>
 				<ListItem>
-					Staleness – świeżość danych (opóźnienie źródło → UI).
+					Wiek danych (staleness) – opóźnienie od źródła do UI.
 				</ListItem>
 			</List>
 			<Divider sx={{ my: 2 }} />
@@ -64,13 +66,13 @@ export default function ResearchGuide() {
 				</ListItem>
 				<ListItem>
 					<strong>3. Obserwacja:</strong>&nbsp;Odczytaj średnie / typowe
-					wartości CPU, Rate, Bytes/s, Jitter, Staleness. Zanotuj (arkusz /
+					wartości CPU, tempo, B/s, jitter, wiek danych. Zanotuj (arkusz /
 					notatki).
 				</ListItem>
 				<ListItem>
 					<strong>4. Zmiana strategii:</strong>&nbsp;Przełącz na drugi tryb
-					(push ↔ pull) zachowując porównywalny Rate (Hz lub interwał) i powtórz
-					notatki.
+					(push ↔ pull) zachowując porównywalne tempo (Hz lub interwał) i
+					powtórz notatki.
 				</ListItem>
 				<ListItem>
 					<strong>5. Wariacje:</strong>&nbsp;Powtórz dla innego interwału
