@@ -11,6 +11,9 @@ export interface ResearchRunStatus {
 	evaluatedCount?: number;
 	config?: Record<string, unknown>;
 	configLabel?: string;
+	// Metadane presetu (dla tabeli ostatnich runów)
+	presetKey?: string;
+	presetLabel?: string;
 	totalSessions?: number;
 	completedSessions?: number;
 	currentLabel?: string;

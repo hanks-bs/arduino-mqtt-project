@@ -419,7 +419,13 @@ export default function ResearchRunPanel() {
 			const res = await fetch(`${API_BASE}/api/research/run`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(requestBody),
+							body: JSON.stringify({
+								...requestBody,
+								// Jeśli wybrano predefiniowany preset, dołącz jego klucz i etykietę
+								...(presetKey !== 'custom'
+									? { presetKey, presetLabel: activePreset?.label }
+									: {}),
+							}),
 			});
 			const json = await res.json();
 			if (json.success) {
@@ -453,6 +459,31 @@ export default function ResearchRunPanel() {
 		} catch (e) {
 			console.error("[research-panel] abort error", e);
 		}
+	};
+
+	// Heurystyka dla kolumny „Test” na podstawie skrótu configLabel z backendu
+	// Backend buduje label w formie: "m=ws+polling Hz=1,2 L=0,50 30s x2 C[ws:1,10/http:1,10] pair"
+	const guessTestName = (cfg?: string): string => {
+		if (!cfg) return "—";
+		// Normalizacje pomocnicze
+		const has = (re: RegExp) => re.test(cfg);
+		// 1) Zestawy charakterystyczne
+		if (has(/Hz=1,2,4/) && has(/L=0,50/)) return "Kontrast";
+		if (has(/Hz=4,8/) && has(/L=0,25/)) return "Kontrast (4–8 Hz)";
+		if (has(/Hz=0\.5,1,2,4/)) return "Częstotliwości";
+		if (has(/L=0,25,50,75/)) return "Poziomy obciążenia";
+		if (has(/Hz=2,4,8/) && has(/L=0,25,50,75/)) return "Miks stresowy";
+		// 2) Skale klientów – szeroka skala (do 100)
+		if (has(/C\[[^\]]*(75|100)[^\]]*\]/)) return "Szeroka skala";
+		// 3) Klasyczne skalowanie: 1/10/25/50
+		if (has(/C\[[^\]]*(^|[^0-9])(1|1,10|1,10,25|1,10,25,50)([^0-9]|$)/) || has(/C\[[^\]]*10,25,50[^\]]*\]/))
+			return "Skalowanie klientów";
+		// 4) Bazowe: 40s x2 @1Hz + parowanie
+		if (has(/Hz=1(,|\s|$)/) && has(/\b40s\b/) && has(/x2/) && has(/\bpair\b/))
+			return "Bazowy";
+		// 5) Szybki 4s: 4s i Hz=1,2
+		if (has(/\b4s\b/) && has(/Hz=1,2/)) return "Szybki 4s";
+		return "—";
 	};
 
 	return (
@@ -1069,6 +1100,7 @@ export default function ResearchRunPanel() {
 								<thead>
 									<tr>
 										<th style={{ textAlign: "left", padding: 4 }}>ID</th>
+									<th style={{ textAlign: "left", padding: 4 }}>Test</th>
 										<th style={{ textAlign: "left", padding: 4 }}>
 											Konfiguracja
 										</th>
@@ -1096,6 +1128,9 @@ export default function ResearchRunPanel() {
 													cursor: "pointer",
 												}}>
 												<td style={{ padding: 4 }}>{r.id}</td>
+												<td style={{ padding: 4, maxWidth: 160 }} title={r.presetLabel || ''}>
+													{r.presetLabel || guessTestName(r.configLabel)}
+												</td>
 												<td
 													style={{ padding: 4, maxWidth: 160 }}
 													title={r.configLabel || ""}>

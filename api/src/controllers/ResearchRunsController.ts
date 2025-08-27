@@ -14,6 +14,9 @@ interface RunStatus {
   evaluatedCount?: number;
   config?: any; // oryginalne opcje startu
   configLabel?: string; // skrócony opis konfiguracji
+  // Metadane presetu (jeśli uruchomiono z predefiniowanego testu)
+  presetKey?: string;
+  presetLabel?: string;
   // Live progress
   totalSessions?: number;
   completedSessions?: number;
@@ -157,6 +160,13 @@ class ResearchRunsController {
         // zachowaj konfigurację + skrót
         status.config = opts;
         status.configLabel = summarizeConfig(opts);
+        // Jeśli UI podał presetKey/presetLabel – zachowaj do prezentacji w historii
+        if (typeof (opts as any).presetKey === 'string') {
+          status.presetKey = (opts as any).presetKey;
+        }
+        if (typeof (opts as any).presetLabel === 'string') {
+          status.presetLabel = (opts as any).presetLabel;
+        }
         const { outDir, evaluated, flags } = await runMeasurements(opts, {
           onProgress: (p: RunProgress) => {
             const st = runs.get(id);
@@ -176,6 +186,27 @@ class ResearchRunsController {
         status.evaluatedCount = evaluated?.length;
         status.flags = flags;
         status.finishedAt = new Date().toISOString();
+        // Zapisz metadane presetu do summary.json (aby były dostępne po restarcie procesu)
+        try {
+          if (outDir) {
+            const summaryPath = path.join(outDir, 'summary.json');
+            if (await fs.pathExists(summaryPath)) {
+              const summary: any = await fs.readJSON(summaryPath);
+              if (status.presetKey) summary.presetKey = status.presetKey;
+              if (status.presetLabel) summary.presetLabel = status.presetLabel;
+              // Zachowaj też zagnieżdżony obiekt preset dla ewentualnej zgodności
+              if (status.presetKey || status.presetLabel) {
+                summary.preset = {
+                  key: status.presetKey,
+                  label: status.presetLabel,
+                };
+              }
+              await fs.writeJSON(summaryPath, summary, { spaces: 2 });
+            }
+          }
+        } catch (e) {
+          console.warn('[research-runs] failed to persist preset metadata', e);
+        }
         // Aktualizacja dokumentu aspektu badawczego
         updateResearchAspectDoc({ outDir, evaluated, flags }).catch(() => {});
       } catch (e: any) {
@@ -247,6 +278,8 @@ class ResearchRunsController {
           let configLabel: string | undefined;
           let config: any;
           let flags: any;
+          let presetKey: string | undefined;
+          let presetLabel: string | undefined;
           let runStartedAt: string | undefined;
           let runFinishedAt: string | undefined;
           try {
@@ -261,6 +294,9 @@ class ResearchRunsController {
               configLabel = summarizeConfig(rc);
             }
             if (summary?.flags) flags = summary.flags;
+            // Opcjonalne metadane presetu jeśli będą kiedyś zapisywane w summary
+            presetKey = (summary as any)?.presetKey || (summary as any)?.preset?.key;
+            presetLabel = (summary as any)?.presetLabel || (summary as any)?.preset?.label;
             if (summary?.runStartedAt) runStartedAt = summary.runStartedAt;
             if (summary?.runFinishedAt) runFinishedAt = summary.runFinishedAt;
           } catch {}
@@ -272,6 +308,8 @@ class ResearchRunsController {
             config,
             configLabel,
             flags,
+            presetKey,
+            presetLabel,
           });
         }
       }
