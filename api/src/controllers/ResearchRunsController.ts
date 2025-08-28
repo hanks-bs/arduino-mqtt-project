@@ -295,8 +295,10 @@ class ResearchRunsController {
             }
             if (summary?.flags) flags = summary.flags;
             // Opcjonalne metadane presetu jeśli będą kiedyś zapisywane w summary
-            presetKey = (summary as any)?.presetKey || (summary as any)?.preset?.key;
-            presetLabel = (summary as any)?.presetLabel || (summary as any)?.preset?.label;
+            presetKey =
+              (summary as any)?.presetKey || (summary as any)?.preset?.key;
+            presetLabel =
+              (summary as any)?.presetLabel || (summary as any)?.preset?.label;
             if (summary?.runStartedAt) runStartedAt = summary.runStartedAt;
             if (summary?.runFinishedAt) runFinishedAt = summary.runFinishedAt;
           } catch {}
